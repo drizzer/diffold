@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="580" height="480" viewBox="0 0 580 480" font-family="ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace" font-size="13">
+  <rect width="580" height="480" rx="10" fill="#282c34"/>
+  <rect width="580" height="34" rx="10" fill="#21252b"/>
+  <rect y="17" width="580" height="17" fill="#21252b"/>
+  <circle cx="26" cy="17" r="6" fill="#ff5f56"/>
+  <circle cx="46" cy="17" r="6" fill="#ffbd2e"/>
+  <circle cx="66" cy="17" r="6" fill="#27c93f"/>
+  <text x="290" y="21" fill="#5c6370" text-anchor="middle" font-size="12">diffold</text>
+  <text x="20" y="56"><tspan fill="#98c379">$ </tspan><tspan fill="#e5e5e5">diffold test_dir1 test_dir2</tspan></text>
+  <text x="20" y="77" fill="#e5c07b">=== Folder Diff Report (2 valid folders) ===</text>
+  <text x="20" y="119"><tspan fill="#e5e5e5">Folder 1: 4 total files (</tspan><tspan fill="#61afef">test_dir1</tspan><tspan fill="#e5e5e5">):</tspan></text>
+  <text x="20" y="140"><tspan fill="#e5e5e5">  Unique: </tspan><tspan fill="#e06c75">2</tspan><tspan fill="#e5e5e5"> | Missing: </tspan><tspan fill="#e06c75">1</tspan></text>
+  <text x="20" y="161" fill="#e5e5e5">  Unique files:</text>
+  <text x="20" y="182" fill="#abb2bf">    file1.txt</text>
+  <text x="20" y="203" fill="#abb2bf">    unique1.txt</text>
+  <text x="20" y="224" fill="#e5e5e5">  Missing files:</text>
+  <text x="20" y="245" fill="#abb2bf">    unique2.txt</text>
+  <text x="20" y="287"><tspan fill="#e5e5e5">Folder 2: 3 total files (</tspan><tspan fill="#61afef">test_dir2</tspan><tspan fill="#e5e5e5">):</tspan></text>
+  <text x="20" y="308"><tspan fill="#e5e5e5">  Unique: </tspan><tspan fill="#e06c75">1</tspan><tspan fill="#e5e5e5"> | Missing: </tspan><tspan fill="#e06c75">2</tspan></text>
+  <text x="20" y="329" fill="#e5e5e5">  Unique files:</text>
+  <text x="20" y="350" fill="#abb2bf">    unique2.txt</text>
+  <text x="20" y="371" fill="#e5e5e5">  Missing files:</text>
+  <text x="20" y="392" fill="#abb2bf">    file1.txt</text>
+  <text x="20" y="413" fill="#abb2bf">    unique1.txt</text>
+  <text x="20" y="455"><tspan fill="#e5e5e5">Common to all 2 folders: </tspan><tspan fill="#98c379">2</tspan><tspan fill="#e5e5e5"> files</tspan></text>
+</svg>

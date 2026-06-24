@@ -1,0 +1,40 @@
+docs/
+
+AGENTS.md
+.agents/
+
+# dependencies
+node_modules
+
+# bun.lock is the only lockfile (see packageManager in package.json)
+package-lock.json
+yarn.lock
+
+# output
+out
+dist
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+*.log
+report.*.json
+
+# dotenv environment variable files
+*.env*
+!.env.example
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# Finder (MacOS) folder config
+.DS_Store

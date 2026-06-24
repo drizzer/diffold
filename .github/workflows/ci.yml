@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test with the Node test runner
+        run: bun run test
+
+      - name: Test with the Bun test runner
+        run: bun test
+
+      - name: Build
+        run: bun run build
+
+      - name: Smoke test the compiled CLI
+        run: node dist/index.js tests/test-folders/test_dir1 tests/test-folders/test_dir2
+
+      - name: Check the publish payload
+        run: bun pm pack
+
+  node-versions:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24", "26"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Set up Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Run the compiled CLI
+        run: node dist/index.js tests/test-folders/test_dir1 tests/test-folders/test_dir2
+
+  deno:
+    name: Deno (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install dependencies
+        # Deno resolves the `types: ["node"]` entry in tsconfig.json from
+        # node_modules, so the dependency tree must be installed first.
+        run: bun install --frozen-lockfile
+
+      - name: Run the CLI from source
+        run: deno run --allow-read --allow-env index.ts tests/test-folders/test_dir1 tests/test-folders/test_dir2
+
+      - name: Test
+        # --allow-sys is needed for os.homedir() used by ~ expansion.
+        run: deno test --allow-read --allow-write --allow-env --allow-run --allow-sys "tests/**/*.test.ts"

@@ -1,0 +1,50 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Update npm for trusted publishing
+        # npm Trusted Publishing (OIDC) requires npm CLI 11.5.1 or later.
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify the release tag matches package.json
+        if: github.event_name == 'release'
+        run: |
+          set -eu
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::release tag '$tag' does not match package.json version '$pkg'"
+            exit 1
+          fi
+          echo "Releasing $pkg"
+
+      - name: Publish
+        # Authenticates via npm Trusted Publishing (OIDC) — no NPM_TOKEN needed.
+        run: npm publish --access public --provenance
