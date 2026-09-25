@@ -4,17 +4,77 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to verify and publish, for example v0.0.1. It must match package.json.'
+        required: true
+        type: string
+      dry_run:
+        description: 'Verify the release without publishing to npm.'
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
+  # Needed to read the CI workflow's run status for this commit.
+  actions: read
   id-token: write
 
 jobs:
   publish:
     name: Publish to npm
+    environment: npm-publish
     runs-on: ubuntu-latest
     steps:
+      - name: Validate the publish trigger
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.ref_type }}" != "tag" ]; then
+            echo "::error::Manual publish runs must start from a version tag, for example v0.0.1. Refusing to publish from ${{ github.ref }}."
+            exit 1
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.ref_type }}" = "tag" ] && [ "${{ github.ref_name }}" != "${{ inputs.tag }}" ]; then
+            echo "::error::Manual run ref '${{ github.ref_name }}' does not match requested tag '${{ inputs.tag }}'."
+            exit 1
+          fi
+
+      - name: Require a successful CI run for this commit
+        # Publishing is only allowed for a commit whose CI actually passed.
+        # CI status is not otherwise linked to a release, so query it here.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          echo "Requiring a green CI run for ${GITHUB_SHA}"
+          for attempt in $(seq 1 60); do
+            state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&per_page=100" \
+              --jq 'if ([.workflow_runs[] | select(.conclusion == "success")] | length) > 0 then "green" elif ([.workflow_runs[] | select(.status != "completed")] | length) > 0 then "pending" elif (.workflow_runs | length) == 0 then "missing" else "failed" end')"
+            case "$state" in
+              green)
+                echo "CI is green for ${GITHUB_SHA}"
+                exit 0
+                ;;
+              pending)
+                echo "CI still running for ${GITHUB_SHA}; waiting (attempt ${attempt}/60)"
+                sleep 10
+                ;;
+              missing)
+                echo "::error::No CI run found for ${GITHUB_SHA}. Push the commit to main or open a pull request and wait for CI before releasing."
+                exit 1
+                ;;
+              *)
+                echo "::error::CI did not pass for ${GITHUB_SHA}. Fix CI and re-run it before releasing."
+                exit 1
+                ;;
+            esac
+          done
+          echo "::error::Timed out waiting for a green CI run for ${GITHUB_SHA}."
+          exit 1
+
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -28,16 +88,48 @@ jobs:
 
       - name: Update npm for trusted publishing
         # npm Trusted Publishing (OIDC) requires npm CLI 11.5.1 or later.
-        run: npm install -g npm@latest
+        # Keep this pinned so the release path is reproducible. Dependabot covers
+        # actions; monitor npm releases before changing this version.
+        run: npm install -g npm@11.12.1
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test with the Node test runner
+        run: bun run test
+
+      - name: Test with the Bun test runner
+        run: bun test
+
+      - name: Build
+        run: bun run build
+
+      - name: Smoke test the compiled CLI
+        run: node dist/index.js tests/test-folders/test_dir1 tests/test-folders/test_dir2
+
+      - name: Check the publish payload
+        run: bun pm pack
+
       - name: Verify the release tag matches package.json
-        if: github.event_name == 'release'
         run: |
           set -eu
-          tag="${GITHUB_REF_NAME#v}"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            raw_tag="${GITHUB_REF_NAME}"
+          else
+            raw_tag="${{ inputs.tag }}"
+          fi
+          case "$raw_tag" in
+            v[0-9]*.[0-9]*.[0-9]*)
+              ;;
+            *)
+              echo "::error::release tag '$raw_tag' must use semantic-version form vX.Y.Z"
+              exit 1
+              ;;
+          esac
+          tag="${raw_tag#v}"
           pkg="$(node -p "require('./package.json').version")"
           if [ "$tag" != "$pkg" ]; then
             echo "::error::release tag '$tag' does not match package.json version '$pkg'"
@@ -46,5 +138,10 @@ jobs:
           echo "Releasing $pkg"
 
       - name: Publish
+        if: github.event_name == 'release' || inputs.dry_run == false
         # Authenticates via npm Trusted Publishing (OIDC) — no NPM_TOKEN needed.
         run: npm publish --access public --provenance
+
+      - name: Manual publish dry run
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: npm publish --access public --provenance --dry-run

@@ -1,6 +1,6 @@
 {
   "name": "diffold",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Compare directories and show differences with color-coded output",
   "type": "module",
   "packageManager": "bun@1.4.0",
@@ -20,13 +20,13 @@
   },
   "scripts": {
     "build": "esbuild index.ts --bundle --platform=node --outfile=dist/index.js --format=esm --banner:js=\"#!/usr/bin/env node\" --external:\"node:*\" --target=es2022",
-    "prepare": "npm run build",
-    "prepublishOnly": "npm run typecheck && npm test && npm run build",
+    "prepare": "bun run build",
+    "prepublishOnly": "bun run typecheck && bun test && bun run test && bun run build",
     "test": "node --import tsx --test tests/**/*.test.ts",
     "test:bun": "bun test",
     "test:deno": "deno test --allow-read --allow-write --allow-env --allow-run --allow-sys tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "start": "npm run build && node dist/index.js",
+    "start": "bun run build && node dist/index.js",
     "start:bun": "bun index.ts",
     "start:deno": "deno run --allow-read --allow-env --allow-sys index.ts",
     "start:dist": "node dist/index.js"
@@ -53,7 +53,7 @@
   "homepage": "https://github.com/drizzer/diffold#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/drizzer/diffold.git"
+    "url": "git+https://github.com/drizzer/diffold.git"
   },
   "bugs": {
     "url": "https://github.com/drizzer/diffold/issues"

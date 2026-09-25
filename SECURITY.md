@@ -17,3 +17,5 @@ Non-sensitive bugs can be filed as regular [GitHub issues](https://github.com/dr
 - No runtime dependencies in the compiled CLI.
 - Uses Node-compatible built-in modules only.
 - Explicitly skips symbolic links during traversal.
+- Streams directory entries during traversal and fails closed when traversal limits are exceeded.
+- Reports unreadable subdirectories and marks incomplete comparisons instead of silently exiting successfully.

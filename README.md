@@ -34,11 +34,23 @@ diffold dir1 dir2 dir3
 diffold <dir1> <dir2> [... <dirN>]
 ```
 
-- Requires 2 to 5 directory paths.
+- Requires 2 to 5 directory paths. Every requested folder must validate; if
+  any folder cannot be used, diffold reports each bad argument and exits 1.
 - Compares file presence by relative path only; it does not compare file contents.
 - Skips symbolic links, and ignores entries that resolve outside a compared folder.
-- Traversal is capped at 256 levels and 500,000 files per folder. Raise the caps with
-  `DIFFOLD_MAX_DEPTH` / `DIFFOLD_MAX_FILES` when a real tree legitimately exceeds them.
+- Traversal streams directory entries and counts every visited entry against
+  `DIFFOLD_MAX_FILES` (default 500,000), with recursion capped by
+  `DIFFOLD_MAX_DEPTH` (default 256). Directories also consume traversal budget,
+  so empty-directory trees cannot bypass the file-count limit. Raise the caps
+  with `DIFFOLD_MAX_DEPTH` / `DIFFOLD_MAX_FILES` when a real tree legitimately
+  exceeds them.
+- Empty or whitespace-only directory arguments are rejected before traversal.
+  Other names are used exactly as supplied; unsupported `~user/...` spellings
+  are not expanded into the current home directory.
+- Subdirectories that cannot be read are reported as `[skip] ...` on stderr,
+  marked per folder in the report, followed by a `WARNING: Comparison
+  incomplete` message; the CLI then exits 1 so scripts do not treat a partial
+  report as success.
 - File names, printed paths, and error messages are stripped of ANSI/control sequences,
   so a crafted name cannot rewrite your terminal.
 - On Windows, quote backslash paths (`"F:\dir\sub"`) or use forward slashes (`F:/dir/sub`) —
@@ -59,7 +71,8 @@ diffold <dir1> <dir2> [... <dirN>]
 - Windows drive and slash normalization
 - Guarded traversal (depth and file-count limits)
 - Terminal-safe output (ANSI/control-sequence sanitization)
-- Runtime source compatibility with Node.js, Bun, and Deno
+- Runtime source compatibility with Node.js and Bun. Deno source execution is
+  best-effort and remains non-blocking in CI.
 
 ## Local Development
 
@@ -88,5 +101,5 @@ Installing straight from Git also works — the `prepare` script builds `dist/` 
 
 - Published package / `npx`: Node.js 22+
 - Published package / `bunx`: Bun 1.4+
-- Source execution: Bun 1.4+, Deno, or Node.js 22+ with `tsx`
+- Source execution: Bun 1.4+ or Node.js 22+ with `tsx`; Deno source execution is best-effort
 - Development: Bun 1.4+ (the declared `packageManager`)

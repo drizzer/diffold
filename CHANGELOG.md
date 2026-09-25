@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.0.2] — 2026-09-25
+
+Hardening and release-safety update. Behavior is backward compatible with
+`0.0.1` for successful comparisons; the changes tighten validation, traversal
+bounds, incomplete-traversal reporting, and the publish pipeline.
+
+### Fixed
+
+- Reject empty and whitespace-only directory arguments before path resolution. `diffold "" <dir>` previously resolved the empty argument to the current working directory.
+- Preserve significant leading and trailing spaces in directory names instead of silently trimming them to a different path.
+- Stop expanding unsupported `~user/...` spellings into the current home directory, which previously produced a corrupted path such as `<home>user/...`.
+- Restrict Windows drive-letter normalization to Windows, so POSIX names such as `c:notes` are no longer rewritten as `c:/notes`.
+- Require every requested folder to validate. A mistyped folder in a three-folder request no longer produces a silent two-folder report with exit code 0.
+- Report unreadable subdirectories as `[skip] ...`, mark them per folder in the report, print a `WARNING: Comparison incomplete` message, and exit 1 instead of silently returning success for a partial comparison.
+
+### Changed
+
+- Stream directory entries with `fs.opendir()` instead of materializing complete directory listings in memory.
+- Count every visited file and directory against `DIFFOLD_MAX_FILES`, so directory-only trees can no longer bypass the file-count limit.
+- Keep documentation and security claims aligned with observed behavior for traversal bounds, argument validation, and incomplete traversals.
+- Clarify that Bun is the primary development runtime while retaining npm/Node.js compatibility, and document Deno source execution as best-effort.
+- Make manual `publish.yml` runs tag-based and dry-run by default, and pin the release npm CLI instead of using `npm@latest`.
+
+### Added
+
+- Four-folder comparison tests.
+- Five-folder comparison tests.
+- Empty and whitespace-only argument tests.
+- Significant-whitespace path tests.
+- Unsupported tilde-user path test.
+- Strict all-folders-must-validate test.
+- Traversal-entry budget test.
+- Incomplete-traversal reporting test.
+- Windows CI verification job covering typecheck, both test runners, build, compiled CLI, and publish payload.
+- Packed-tarball CLI smoke test on Ubuntu.
+- Full typecheck, test, build, smoke, and payload verification gates before publishing.
+
+### Security
+
+- Reduced memory-exhaustion exposure from very large directories and directory-only traversal bombs.
+- Prevented silently successful reports after an incomplete filesystem traversal.
+- Hardened the release path against accidental publication from an arbitrary branch or a mismatched tag.
+
 ## [0.0.1] — 2026-06-24
 
 Initial release of `diffold`.

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -357,6 +357,168 @@ describe("diffold CLI", () => {
       assert.strictEqual(result.exitCode, 1);
       assert.strictEqual(result.stdout, "");
       assert.ok(result.stderr.includes("DIFFOLD_MAX_FILES"));
+    });
+  });
+
+  it("rejects empty and whitespace-only directory arguments before traversal", async () => {
+    for (const bad of ["", "   "]) {
+      const result = await runDiffold([bad, FIXTURE_DIR2]);
+
+      assert.strictEqual(result.exitCode, 1);
+      assert.strictEqual(result.stdout, "");
+      assert.ok(result.stderr.includes("empty or whitespace-only"));
+    }
+  });
+
+  it("preserves significant leading and trailing spaces in directory names", async () => {
+    await withTempRoot(async (parent) => {
+      const spaced = await makeTree(parent, " spaced ", { "file.txt": "x" });
+      const result = await runDiffold([spaced, FIXTURE_DIR1]);
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.ok(result.stdout.includes("Folder Diff Report (2 valid folders)"));
+      assert.ok(plain(result.stdout).includes("Folder 1: 1 total files"));
+    });
+  });
+
+  it("does not expand unsupported tilde-user spellings into the home directory", async () => {
+    const result = await runDiffold([
+      "~nosuchuserxyz/diffold-missing-dir",
+      FIXTURE_DIR2,
+    ]);
+
+    assert.strictEqual(result.exitCode, 1);
+    assert.strictEqual(result.stdout, "");
+    // The old bug concatenated the literal name onto the home directory, e.g.
+    // `<home>nosuchuserxyz`. Assert on that exact corruption instead of on the
+    // home directory itself, which can legitimately appear in resolved paths
+    // when the working directory lives under it (as on CI runners).
+    assert.ok(
+      !result.stderr.includes(`${os.homedir()}nosuchuserxyz`),
+      "unsupported ~user must not be concatenated onto the home directory",
+    );
+    assert.ok(result.stderr.includes("~nosuchuserxyz"));
+  });
+
+  it("rejects a comparison when any requested folder is invalid", async () => {
+    const result = await runDiffold([
+      FIXTURE_DIR1,
+      "does-not-exist",
+      FIXTURE_DIR2,
+    ]);
+
+    assert.strictEqual(result.exitCode, 1);
+    assert.strictEqual(result.stdout, "");
+    assert.ok(result.stderr.includes("Directory does not exist"));
+    assert.ok(result.stderr.includes("all 3 requested folders must be valid"));
+  });
+
+  it("compares four folders and keeps only files present everywhere as common", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "four-a", {
+        "shared.txt": "a",
+        "only-a.txt": "a",
+      });
+      const b = await makeTree(parent, "four-b", {
+        "shared.txt": "b",
+        "only-b.txt": "b",
+      });
+      const c = await makeTree(parent, "four-c", {
+        "shared.txt": "c",
+        "only-c.txt": "c",
+      });
+      const d = await makeTree(parent, "four-d", {
+        "shared.txt": "d",
+        "only-d.txt": "d",
+      });
+
+      const result = await runDiffold([a, b, c, d]);
+      const output = plain(result.stdout);
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.ok(output.includes("Folder Diff Report (4 valid folders)"));
+      assert.ok(output.includes("Folder 1: 2 total files"));
+      assert.ok(output.includes("Folder 4: 2 total files"));
+      assert.ok(output.includes("only-a.txt"));
+      assert.ok(output.includes("only-d.txt"));
+      assert.ok(output.includes("Common to all 4 folders: 1 files"));
+    });
+  });
+
+  it("compares five folders and reports per-folder unique files", async () => {
+    await withTempRoot(async (parent) => {
+      const trees: string[] = [];
+      for (let index = 0; index < 5; index++) {
+        trees.push(
+          await makeTree(parent, `five-${index}`, {
+            "shared.txt": `${index}`,
+            [`only-${index}.txt`]: `${index}`,
+          }),
+        );
+      }
+
+      const result = await runDiffold(trees);
+      const output = plain(result.stdout);
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.ok(output.includes("Folder Diff Report (5 valid folders)"));
+      for (let index = 0; index < 5; index++) {
+        assert.ok(output.includes(`Folder ${index + 1}: 2 total files`));
+        assert.ok(output.includes(`only-${index}.txt`));
+      }
+      assert.ok(output.includes("Common to all 5 folders: 1 files"));
+    });
+  });
+
+  it("bounds traversal entries before collecting unbounded file state", async () => {
+    await withTempRoot(async (parent) => {
+      const broad = path.join(parent, "broad");
+      await mkdir(broad, { recursive: true });
+      for (let index = 0; index < 4; index++) {
+        await writeFile(path.join(broad, `file-${index}.txt`), "x");
+      }
+
+      const result = await runDiffold([broad, FIXTURE_DIR1], {
+        DIFFOLD_MAX_FILES: "2",
+      });
+
+      assert.strictEqual(result.exitCode, 1);
+      assert.strictEqual(result.stdout, "");
+      assert.ok(result.stderr.includes("DIFFOLD_MAX_FILES"));
+    });
+  });
+
+  it("reports unreadable subdirectories instead of silently returning success", async () => {
+    if (process.platform === "win32") {
+      // Windows ACL setup is not portable enough for this repository suite.
+      return;
+    }
+    await withTempRoot(async (parent) => {
+      const locked = await makeTree(parent, "locked", {
+        "visible.txt": "x",
+        "restricted/secret.txt": "x",
+      });
+      const other = await makeTree(parent, "locked-other", {
+        "visible.txt": "x",
+      });
+
+      await chmod(path.join(locked, "restricted"), 0o000);
+      try {
+        const probe = await runDiffold([locked, locked]);
+        if (probe.exitCode === 0) {
+          // Running as an administrative/root user can still read mode 000.
+          return;
+        }
+
+        const result = await runDiffold([locked, other]);
+
+        assert.strictEqual(result.exitCode, 1);
+        assert.ok(result.stderr.includes("[skip]"));
+        assert.ok(result.stderr.includes("Comparison incomplete"));
+        assert.ok(plain(result.stdout).includes("[1 directory skipped]"));
+      } finally {
+        await chmod(path.join(locked, "restricted"), 0o700);
+      }
     });
   });
 

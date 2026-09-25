@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -13,6 +14,53 @@ jobs:
   verify:
     name: Typecheck, test, build
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test with the Node test runner
+        run: bun run test
+
+      - name: Test with the Bun test runner
+        run: bun test
+
+      - name: Build
+        run: bun run build
+
+      - name: Smoke test the compiled CLI
+        run: node dist/index.js tests/test-folders/test_dir1 tests/test-folders/test_dir2
+
+      - name: Check the publish payload
+        run: bun pm pack
+
+      - name: Smoke test the packed CLI
+        run: |
+          set -eu
+          rm -rf .pack-smoke
+          mkdir -p .pack-smoke
+          tarball="$(bun pm pack --quiet | tail -n 1)"
+          tar -xzf "$tarball" -C .pack-smoke
+          node .pack-smoke/package/dist/index.js tests/test-folders/test_dir1 tests/test-folders/test_dir2
+          rm -rf .pack-smoke "$tarball"
+
+  windows-verify:
+    name: Windows typecheck, test, build
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
 
