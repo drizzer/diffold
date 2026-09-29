@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.0.3] — 2026-09-29
+
+Content comparison ships as the default mode.
+
+### Changed
+
+- **Breaking:** content comparison is now enabled by default. `diffold <dir1> <dir2> [...]` now compares file contents and reports files common to every folder as identical or changed, instead of reporting presence only. Pass `-c` / `--no-content` to restore the previous presence-only behavior.
+
+### Added
+
+- Streaming SHA-256 fingerprints keep memory usage constant regardless of file size, so large files are never buffered whole.
+- `-c` / `--no-content` flags preserve fast presence-only comparisons.
+- `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md`, and a security-posture section describing the current guarantees.
+
 ## [0.0.2] — 2026-09-25
 
 Hardening and release-safety update. Behavior is backward compatible with

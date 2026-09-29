@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 
@@ -44,10 +45,29 @@ function sanitizeForDisplay(value: string): string {
 // the source was launched with; the README documents source execution.
 const RUNNER = "diffold";
 
-const rawDirs = process.argv.slice(2);
+const rawArgs = process.argv.slice(2);
+const rawDirs: string[] = [];
+let compareContent = true;
+
+for (let i = 0; i < rawArgs.length; i++) {
+  const arg = rawArgs[i];
+  if (arg === "-c" || arg === "--no-content") {
+    compareContent = false;
+    continue;
+  }
+  if (arg.startsWith("-") && arg !== "-") {
+    console.error(`${RED}ERROR: Unknown option: ${sanitizeForDisplay(arg)}${RESET}`);
+    process.exit(1);
+  }
+  rawDirs.push(arg);
+}
+
 if (rawDirs.length < 2 || rawDirs.length > 5) {
   console.error(
-    `${RED}Usage: ${RUNNER} <dir1> <dir2> [... <dirN>] (2-5 directories)${RESET}`,
+    `${RED}Usage: ${RUNNER} <dir1> <dir2> [... <dirN>] [options] (2-5 directories)${RESET}`,
+  );
+  console.error(
+    `${RED}Options: -c, --no-content  Compare paths only (content comparison is on by default)${RESET}`,
   );
   process.exit(1);
 }
@@ -228,6 +248,73 @@ async function getRelativeFiles(root: string): Promise<{
   return { files, skippedDirs };
 }
 
+interface FileFingerprint {
+  size: number;
+  hash: string;
+}
+
+interface ContentDifference {
+  path: string;
+  groups: number[][];
+}
+
+async function fingerprintFile(filePath: string): Promise<FileFingerprint> {
+  const handle = await fs.open(filePath, "r");
+  try {
+    const stat = await handle.stat();
+    const hash = createHash("sha256");
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let position = 0;
+    while (true) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+    }
+    return { size: stat.size, hash: hash.digest("hex") };
+  } finally {
+    await handle.close();
+  }
+}
+
+async function compareCommonContent(
+  roots: string[],
+  commonAll: Set<string>,
+): Promise<ContentDifference[]> {
+  if (!compareContent) return [];
+
+  const differences: ContentDifference[] = [];
+  for (const relativePath of [...commonAll].sort()) {
+    const fingerprints: FileFingerprint[] = [];
+    for (let folderIndex = 0; folderIndex < roots.length; folderIndex++) {
+      const fingerprint = await fingerprintFile(
+        path.join(roots[folderIndex], ...relativePath.split("/")),
+      );
+      fingerprints.push(fingerprint);
+    }
+
+    const groups = new Map<string, number[]>();
+    for (let folderIndex = 0; folderIndex < fingerprints.length; folderIndex++) {
+      const fingerprint = fingerprints[folderIndex];
+      const key = `${fingerprint.size}:${fingerprint.hash}`;
+      const group = groups.get(key);
+      if (group) {
+        group.push(folderIndex);
+      } else {
+        groups.set(key, [folderIndex]);
+      }
+    }
+
+    if (groups.size > 1) {
+      const orderedGroups = [...groups.values()].sort(
+        (left, right) => left[0] - right[0],
+      );
+      differences.push({ path: relativePath, groups: orderedGroups });
+    }
+  }
+  return differences;
+}
+
 async function main() {
   // Collect every validation error before deciding. A user who asked for
   // three folders and mistyped one must get an error, not a silent two-folder
@@ -306,6 +393,25 @@ async function main() {
   console.log(
     `Common to all ${validFiles.length} folders: ${GREEN}${commonAll.size}${RESET} files`,
   );
+
+  if (compareContent) {
+    const contentDifferences = await compareCommonContent(validDirs, commonAll);
+    const identicalCount = commonAll.size - contentDifferences.length;
+    console.log(
+      `Content: ${GREEN}${identicalCount} identical${RESET} | ${contentDifferences.length > 0 ? RED : ""}${contentDifferences.length} changed${RESET}`,
+    );
+    if (contentDifferences.length > 0) {
+      console.log("  Changed files:");
+      for (const difference of contentDifferences) {
+        const groups = difference.groups
+          .map((group) => `Folders ${group.map((index) => index + 1).join(", ")}`)
+          .join(" != ");
+        console.log(`    ${sanitizeForDisplay(difference.path)}: ${groups}`);
+      }
+    }
+  } else {
+    console.log("Content: comparison disabled (-c)");
+  }
 
   console.log(
     `${YELLOW}\nSupports ~ (home) for linux/windows and both forward and back slashes: / \\ as separators.${RESET}`,

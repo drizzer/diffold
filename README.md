@@ -31,12 +31,19 @@ diffold dir1 dir2 dir3
 ## Usage
 
 ```bash
-diffold <dir1> <dir2> [... <dirN>]
+diffold <dir1> <dir2> [... <dirN>] [options]
 ```
+
+Options:
+
+| Option | Effect |
+|--------|--------|
+| `-c`, `--no-content` | Compare paths only. Content comparison is enabled by default. |
 
 - Requires 2 to 5 directory paths. Every requested folder must validate; if
   any folder cannot be used, diffold reports each bad argument and exits 1.
-- Compares file presence by relative path only; it does not compare file contents.
+- Compares file presence by relative path and hashes files present in every folder to
+  identify identical versus changed content. Use `-c` / `--no-content` to skip hashing.
 - Skips symbolic links, and ignores entries that resolve outside a compared folder.
 - Traversal streams directory entries and counts every visited entry against
   `DIFFOLD_MAX_FILES` (default 500,000), with recursion capped by
@@ -64,6 +71,7 @@ diffold <dir1> <dir2> [... <dirN>]
 ## Features
 
 - Multi-directory comparison for 2–5 directories
+- Content-aware comparison with streaming SHA-256 hashing (disable with `-c`)
 - Color-coded terminal output
 - Unique, missing, and common file counts
 - Recursive directory traversal

@@ -234,6 +234,63 @@ describe("diffold CLI", () => {
     });
   });
 
+  it("compares common file contents by default", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "content-a", {
+        "same.txt": "same bytes",
+        "changed.txt": "version a",
+        "left.txt": "left only",
+      });
+      const b = await makeTree(parent, "content-b", {
+        "same.txt": "same bytes",
+        "changed.txt": "version b",
+        "right.txt": "right only",
+      });
+
+      const result = await runDiffold([a, b]);
+      const output = plain(result.stdout);
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.ok(output.includes("Common to all 2 folders: 2 files"));
+      assert.ok(output.includes("Content: 1 identical | 1 changed"));
+      assert.ok(output.includes("changed.txt: Folders 1 != Folders 2"));
+      assert.ok(!output.includes("same.txt: Folder"));
+    });
+  });
+
+  it("groups identical content across three folders", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "groups-a", { "shared.txt": "a" });
+      const b = await makeTree(parent, "groups-b", { "shared.txt": "b" });
+      const c = await makeTree(parent, "groups-c", { "shared.txt": "a" });
+
+      const result = await runDiffold([a, b, c]);
+      const output = plain(result.stdout);
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.ok(output.includes("Content: 0 identical | 1 changed"));
+      assert.ok(output.includes("shared.txt: Folders 1, 3 != Folders 2"));
+    });
+  });
+
+  it("disables content comparison with -c and --no-content", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "disabled-a", { "shared.txt": "a" });
+      const b = await makeTree(parent, "disabled-b", { "shared.txt": "b" });
+
+      for (const flag of ["-c", "--no-content"]) {
+        const result = await runDiffold([a, b, flag]);
+        const output = plain(result.stdout);
+
+        assert.strictEqual(result.exitCode, 0);
+        assert.ok(output.includes("Common to all 2 folders: 1 files"));
+        assert.ok(output.includes("Content: comparison disabled (-c)"));
+        assert.ok(!output.includes("Content: 0 identical"));
+      }
+    });
+  });
+
+
   it("resolves equivalent path spellings to the same directory", async () => {
     await withTempRoot(async (parent) => {
       const dir = await makeTree(parent, "norm", {
