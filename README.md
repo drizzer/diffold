@@ -6,11 +6,16 @@ Compare 2–5 directories and see which files are unique, missing, and common ac
 
 [![npm version](https://img.shields.io/npm/v/diffold)](https://www.npmjs.com/package/diffold)
 [![npm downloads](https://img.shields.io/npm/dm/diffold)](https://www.npmjs.com/package/diffold)
+[![published](https://img.shields.io/npm/last-update/diffold?label=published)](https://www.npmjs.com/package/diffold)
 [![license](https://img.shields.io/npm/l/diffold)](./LICENSE)
 [![node](https://img.shields.io/node/v/diffold)](https://nodejs.org/)
+[![deno](https://img.shields.io/badge/deno-2.x%20best--effort-black?logo=deno)](https://deno.com/)
 [![CI](https://github.com/drizzer/diffold/actions/workflows/ci.yml/badge.svg)](https://github.com/drizzer/diffold/actions/workflows/ci.yml)
+[![zero runtime dependencies](https://img.shields.io/badge/zero%20runtime%20dependencies-brightgreen)](./package.json)
 
 <img src="assets/demo.svg" alt="Terminal output of diffold comparing two folders, showing color-coded unique, missing, and common file counts" width="580">
+
+[![sponsor](https://img.shields.io/badge/sponsor-drizzer-ff69b4?label=GitHub%20Sponsors&logo=github-sponsors&logoColor=white)](https://github.com/sponsors/drizzer)
 
 </div>
 
@@ -33,6 +38,7 @@ diffold dir1 dir2 dir3
 - Multi-directory comparison for 2–5 directories
 - Content-aware comparison with streaming SHA-256 hashing (disable with `-c`)
 - Versioned JSON output for CI, scripts, and piping to tools such as `jq`
+- Repeatable glob exclusions for files, directory names, and subtrees
 - Color-coded terminal output
 - Unique, missing, and common file counts
 - Recursive directory traversal
@@ -55,6 +61,20 @@ Options:
 |--------|--------|
 | `-c`, `--no-content` | Compare paths only. Content comparison is enabled by default. |
 | `--json` | Print a machine-readable JSON report to stdout. |
+| `-e`, `--exclude <glob>` | Exclude matching files/directories; repeat for multiple patterns. |
+
+## Excluding Files
+
+Excludes matching files and directory subtrees with repeatable glob patterns:
+
+```bash
+diffold dir1 dir2 --exclude '*.log' --exclude 'node_modules' --exclude 'build/**'
+```
+
+Patterns support `*` (within one path segment), `?` (one non-separator character),
+and `**` (any depth). A pattern without `/` matches a name at any depth; a pattern
+containing `/` is matched against the normalized relative path. Excluded directories
+are pruned before traversal.
 
 ## JSON Output
 
@@ -76,6 +96,16 @@ on stderr for usage errors, so successful JSON output is never mixed with diagno
 - Compares file presence by relative path and hashes files present in every folder to
   identify identical versus changed content. Use `-c` / `--no-content` to skip hashing.
 - Skips symbolic links, and ignores entries that resolve outside a compared folder.
+- Excludes matching files and directory subtrees with repeatable glob patterns:
+
+```bash
+diffold dir1 dir2 --exclude '*.log' --exclude 'node_modules' --exclude 'build/**'
+```
+
+Patterns support `*` (within one path segment), `?` (one non-separator character),
+and `**` (any depth). A pattern without `/` matches a name at any depth; a pattern
+containing `/` is matched against the normalized relative path. Excluded directories
+are pruned before traversal.
 - Traversal streams directory entries and counts every visited entry against
   `DIFFOLD_MAX_FILES` (default 500,000), with recursion capped by
   `DIFFOLD_MAX_DEPTH` (default 256). Directories also consume traversal budget,
@@ -128,3 +158,32 @@ Installing straight from Git also works — the `prepare` script builds `dist/` 
 - Published package / `bunx`: Bun 1.4+
 - Source execution: Bun 1.4+ or Node.js 22+ with `tsx`; Deno source execution is best-effort
 - Development: Bun 1.4+ (the declared `packageManager`)
+
+## Contributing
+
+Contributions are welcome. Please read [CONTRIBUTING.md](./CONTRIBUTING.md) for
+the setup, the runtime matrix you need to test against, and the PR checklist.
+Participation is governed by the
+[Code of Conduct](./CODE_OF_CONDUCT.md).
+
+## Support
+
+If diffold saves you some time, you can support continued maintenance:
+
+- [GitHub Sponsors](https://github.com/sponsors/drizzer)
+- [Ko-fi](https://ko-fi.com/drizzer)
+- [Buy Me a Coffee](https://buymeacoffee.com/drizzer)
+
+Bug reports are most useful when they include the exact arguments, the folder
+layout, and what you expected to happen.
+
+## Security
+
+Please report security issues **privately** through
+[GitHub Security Advisories](https://github.com/drizzer/diffold/security/advisories/new)
+rather than opening a public issue. See [SECURITY.md](./SECURITY.md) for the
+current security posture.
+
+## License
+
+[MIT](./LICENSE) © 2026 DRiZZER

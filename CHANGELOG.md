@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.5] — 2026-10-01
+
+### Added
+
+- `-e` / `--exclude` filters files and prunes directory subtrees with repeatable `*`, `?`, and `**` glob patterns.
+
 ## [0.0.4] — 2026-09-30
 
 ### Added

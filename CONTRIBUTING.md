@@ -12,6 +12,7 @@ diffold <dir1> <dir2> [... <dirN>] [options]
 |--------|--------|
 | `-c`, `--no-content` | Compare paths only (content comparison is on by default) |
 | `--json` | Emit one machine-readable JSON report to stdout |
+| `-e`, `--exclude <glob>` | Exclude matching files/directories; repeatable, supports `*`, `?`, `**` |
 
 ## Development Setup
 

@@ -375,6 +375,63 @@ describe("diffold CLI", () => {
     });
   });
 
+  it("excludes files and directory subtrees with repeatable glob patterns", async () => {
+    await withTempRoot(async (parent) => {
+      const layout = {
+        "keep.txt": "keep",
+        "debug.log": "log",
+        "nested/debug.tmp": "tmp",
+        "node_modules/package/index.js": "dependency",
+        "src/node_modules/also.js": "dependency",
+        "build/output.js": "build",
+        "build/nested/artifact.txt": "build",
+        "src/main.ts": "source",
+      };
+      const a = await makeTree(parent, "exclude-a", layout);
+      const b = await makeTree(parent, "exclude-b", layout);
+
+      const result = await runDiffold([
+        a,
+        b,
+        "--exclude",
+        "*.log",
+        "--exclude=*.tmp",
+        "--exclude",
+        "node_modules",
+        "--exclude",
+        "build/**",
+      ], { DIFFOLD_MAX_FILES: "4" });
+      const report = JSON.parse((await runDiffold([
+        a,
+        b,
+        "--json",
+        "--exclude",
+        "*.log",
+        "--exclude=*.tmp",
+        "--exclude",
+        "node_modules",
+        "--exclude",
+        "build/**",
+      ])).stdout);
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.ok(plain(result.stdout).includes("Folder 1: 2 total files"));
+      assert.deepStrictEqual(report.common, ["keep.txt", "src/main.ts"]);
+      assert.ok(!result.stdout.includes("debug.log"));
+      assert.ok(!result.stdout.includes("debug.tmp"));
+      assert.ok(!result.stdout.includes("node_modules"));
+      assert.ok(!result.stdout.includes("build/"));
+    });
+  });
+
+  it("requires a pattern for --exclude", async () => {
+    const result = await runDiffold([FIXTURE_DIR1, FIXTURE_DIR2, "--exclude"]);
+
+    assert.strictEqual(result.exitCode, 1);
+    assert.strictEqual(result.stdout, "");
+    assert.ok(result.stderr.includes("--exclude requires a non-empty pattern"));
+  });
+
   it("expands ~ and reports the expanded path for a missing directory", async () => {
     const missing = "diffold-missing-dir-xyz";
     const result = await runDiffold([`~/${missing}`, "~/diffold-missing-dir-abc"]);

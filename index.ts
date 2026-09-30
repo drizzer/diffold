@@ -47,6 +47,7 @@ const RUNNER = "diffold";
 
 const rawArgs = process.argv.slice(2);
 const rawDirs: string[] = [];
+const excludePatterns: string[] = [];
 let compareContent = true;
 let jsonOutput = false;
 
@@ -58,6 +59,25 @@ for (let i = 0; i < rawArgs.length; i++) {
   }
   if (arg === "--json") {
     jsonOutput = true;
+    continue;
+  }
+  if (arg === "-e" || arg === "--exclude") {
+    const pattern = rawArgs[i + 1];
+    if (pattern === undefined || pattern.trim() === "") {
+      console.error(`${RED}ERROR: ${arg} requires a non-empty pattern${RESET}`);
+      process.exit(1);
+    }
+    excludePatterns.push(pattern);
+    i++;
+    continue;
+  }
+  if (arg.startsWith("--exclude=")) {
+    const pattern = arg.slice("--exclude=".length);
+    if (pattern.trim() === "") {
+      console.error(`${RED}ERROR: --exclude requires a non-empty pattern${RESET}`);
+      process.exit(1);
+    }
+    excludePatterns.push(pattern);
     continue;
   }
   if (arg.startsWith("-") && arg !== "-") {
@@ -75,6 +95,7 @@ if (rawDirs.length < 2 || rawDirs.length > 5) {
     `${RED}Options: -c, --no-content  Compare paths only (content comparison is on by default)${RESET}`,
   );
   console.error(`${RED}         --json            Print a machine-readable report to stdout${RESET}`);
+  console.error(`${RED}Options: -e, --exclude <glob>  Exclude matching files/directories (repeatable)${RESET}`);
   process.exit(1);
 }
 
@@ -158,6 +179,57 @@ async function resolveDirectory(
   }
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[|\\{}()[\]^$+?.-]/g, "\\$&");
+}
+
+interface ExcludeMatcher {
+  path: RegExp;
+  segment: RegExp | null;
+}
+
+function globToRegExp(pattern: string): ExcludeMatcher {
+  const normalized = pattern.replace(/\\/g, "/").replace(/^\.\//, "");
+  const isSegmentPattern = !normalized.includes("/");
+  let source = "";
+  for (let i = 0; i < normalized.length; i++) {
+    const char = normalized[i];
+    if (char === "*") {
+      if (normalized[i + 1] === "*") {
+        i++;
+        if (normalized[i + 1] === "/") {
+          i++;
+          source += "(?:.*/)?";
+        } else {
+          source += ".*";
+        }
+      } else {
+        source += "[^/]*";
+      }
+    } else if (char === "?") {
+      source += "[^/]";
+    } else {
+      source += escapeRegex(char);
+    }
+  }
+  const pathMatcher = normalized.endsWith("/**")
+    ? new RegExp(`^${source.slice(0, -3)}(?:/.*)?$`)
+    : new RegExp(`^${source}$`);
+  const segmentMatcher = isSegmentPattern
+    ? new RegExp(`(?:^|/)${source}(?=/|$)`)
+    : null;
+  return { path: pathMatcher, segment: segmentMatcher };
+}
+
+const excludeMatchers = excludePatterns.map(globToRegExp);
+
+function isExcluded(relativePath: string): boolean {
+  return excludeMatchers.some(
+    (matcher) => matcher.path.test(relativePath) ||
+      matcher.segment?.test(relativePath) === true,
+  );
+}
+
 async function getRelativeFiles(root: string): Promise<{
   files: Set<string>;
   skippedDirs: string[];
@@ -203,9 +275,9 @@ async function getRelativeFiles(root: string): Promise<{
         }
 
         const relPath = path.relative(resolvedRoot, resolved).replace(/\\/g, "/");
-        if (!relPath) continue;
+        if (!relPath || isExcluded(relPath)) continue;
 
-        // Every visited entry consumes traversal budget, so a tree made only
+        // Every non-excluded visited entry consumes traversal budget, so a tree made only
         // of empty directories cannot bypass DIFFOLD_MAX_FILES.
         scannedEntries++;
         if (scannedEntries > MAX_FILES) {
