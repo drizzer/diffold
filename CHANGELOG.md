@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.4] — 2026-09-30
+
+### Added
+
+- `--json` prints a versioned, machine-readable report to stdout for CI, scripts, redirection, and pipes.
+
+### Fixed
+
+- Tighten the publish gate so a failed CI run on a commit can no longer be masked by an older successful run on the same commit. The gate now requires the most recent completed CI run to be green.
+
 ## [0.0.3] — 2026-09-29
 
 Content comparison ships as the default mode.

@@ -20,3 +20,4 @@ Non-sensitive bugs can be filed as regular [GitHub issues](https://github.com/dr
 - Streams directory entries during traversal and fails closed when traversal limits are exceeded.
 - Reports unreadable subdirectories and marks incomplete comparisons instead of silently exiting successfully.
 - Content comparison streams files through SHA-256 in fixed-size chunks; it never buffers a whole file or retains contents. Pass `-c` / `--no-content` for a presence-only run that never opens file contents.
+- JSON mode keeps stdout to a single JSON document; all diagnostics, `[skip]` lines, and warnings stay on stderr so piped output is safe to parse.

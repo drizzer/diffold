@@ -28,6 +28,21 @@ npm install -g diffold
 diffold dir1 dir2 dir3
 ```
 
+## Features
+
+- Multi-directory comparison for 2–5 directories
+- Content-aware comparison with streaming SHA-256 hashing (disable with `-c`)
+- Versioned JSON output for CI, scripts, and piping to tools such as `jq`
+- Color-coded terminal output
+- Unique, missing, and common file counts
+- Recursive directory traversal
+- `~` home-directory expansion
+- Windows drive and slash normalization
+- Guarded traversal (depth and file-count limits)
+- Terminal-safe output (ANSI/control-sequence sanitization)
+- Runtime source compatibility with Node.js and Bun. Deno source execution is
+  best-effort and remains non-blocking in CI.
+
 ## Usage
 
 ```bash
@@ -39,6 +54,22 @@ Options:
 | Option | Effect |
 |--------|--------|
 | `-c`, `--no-content` | Compare paths only. Content comparison is enabled by default. |
+| `--json` | Print a machine-readable JSON report to stdout. |
+
+## JSON Output
+
+`--json` prints one JSON document to stdout. Redirect it to a file or pipe it to another tool; diffold does not choose or create an output path:
+
+```bash
+diffold dir1 dir2 --json > report.json
+diffold dir1 dir2 --json | jq '.modified'
+```
+
+The JSON contract includes `schemaVersion: 1`, folder metadata, `unique`, `missing`,
+`common`, `identical`, `modified`, and `incomplete`. Human-readable help text remains
+on stderr for usage errors, so successful JSON output is never mixed with diagnostics.
+
+## Behavior & Limits
 
 - Requires 2 to 5 directory paths. Every requested folder must validate; if
   any folder cannot be used, diffold reports each bad argument and exits 1.
@@ -67,20 +98,6 @@ Options:
   it resolves the binary path but never links the package into the global
   `node_modules`. Run `bun install -g diffold` once (then `bunx diffold`
   works), or use `npx diffold@latest` instead.
-
-## Features
-
-- Multi-directory comparison for 2–5 directories
-- Content-aware comparison with streaming SHA-256 hashing (disable with `-c`)
-- Color-coded terminal output
-- Unique, missing, and common file counts
-- Recursive directory traversal
-- `~` home-directory expansion
-- Windows drive and slash normalization
-- Guarded traversal (depth and file-count limits)
-- Terminal-safe output (ANSI/control-sequence sanitization)
-- Runtime source compatibility with Node.js and Bun. Deno source execution is
-  best-effort and remains non-blocking in CI.
 
 ## Local Development
 

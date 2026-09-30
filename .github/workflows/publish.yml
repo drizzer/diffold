@@ -42,6 +42,9 @@ jobs:
       - name: Require a successful CI run for this commit
         # Publishing is only allowed for a commit whose CI actually passed.
         # CI status is not otherwise linked to a release, so query it here.
+        # The newest completed run must be green: an older green run on the
+        # same commit must not mask a later red one, otherwise a flaky or
+        # ref-broken rerun could still publish.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -49,7 +52,7 @@ jobs:
           echo "Requiring a green CI run for ${GITHUB_SHA}"
           for attempt in $(seq 1 60); do
             state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&per_page=100" \
-              --jq 'if ([.workflow_runs[] | select(.conclusion == "success")] | length) > 0 then "green" elif ([.workflow_runs[] | select(.status != "completed")] | length) > 0 then "pending" elif (.workflow_runs | length) == 0 then "missing" else "failed" end')"
+              --jq '(.workflow_runs | sort_by(.created_at) | last) as $latest | if (.workflow_runs | length) == 0 then "missing" elif $latest.status != "completed" then "pending" elif $latest.conclusion == "success" then "green" else "failed" end')"
             case "$state" in
               green)
                 echo "CI is green for ${GITHUB_SHA}"

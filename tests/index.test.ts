@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { spawn } from "node:child_process";
-import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -290,6 +290,64 @@ describe("diffold CLI", () => {
     });
   });
 
+
+
+  it("prints one machine-readable JSON report to stdout", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "json-a", {
+        "same.txt": "same",
+        "changed.txt": "a",
+        "only-a.txt": "a",
+      });
+      const b = await makeTree(parent, "json-b", {
+        "same.txt": "same",
+        "changed.txt": "b",
+        "only-b.txt": "b",
+      });
+
+      const result = await runDiffold([a, b, "--json"]);
+      const report = JSON.parse(result.stdout);
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.strictEqual(result.stderr, "");
+      assert.strictEqual(report.schemaVersion, 1);
+      assert.strictEqual(report.contentComparison, "sha256");
+      // The CLI resolves each folder through fs.realpath. On Windows that
+      // canonicalises an 8.3 short temp path (RUNNER~1) to its long form
+      // (runneradmin), while os.tmpdir() may hand the short spelling back.
+      // Compare resolved paths so the expectation holds on every platform.
+      assert.deepStrictEqual(
+        report.folders.map((folder: { path: string }) => folder.path),
+        [await realpath(a), await realpath(b)],
+      );
+      assert.deepStrictEqual(report.unique, [["only-a.txt"], ["only-b.txt"]]);
+      assert.deepStrictEqual(report.missing, [["only-b.txt"], ["only-a.txt"]]);
+      assert.deepStrictEqual(report.common, ["changed.txt", "same.txt"]);
+      assert.deepStrictEqual(report.identical, ["same.txt"]);
+      assert.deepStrictEqual(report.modified, [
+        { path: "changed.txt", groups: [[0], [1]] },
+      ]);
+      assert.strictEqual(report.incomplete, false);
+      assert.ok(!result.stdout.includes("Folder Diff Report"));
+      assert.ok(!result.stdout.includes("\u001b["));
+    });
+  });
+
+  it("represents disabled content comparison in JSON", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "json-disabled-a", { "shared.txt": "a" });
+      const b = await makeTree(parent, "json-disabled-b", { "shared.txt": "b" });
+
+      const result = await runDiffold([a, b, "--json", "-c"]);
+      const report = JSON.parse(result.stdout);
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.strictEqual(report.contentComparison, "disabled");
+      assert.deepStrictEqual(report.common, ["shared.txt"]);
+      assert.deepStrictEqual(report.identical, []);
+      assert.deepStrictEqual(report.modified, []);
+    });
+  });
 
   it("resolves equivalent path spellings to the same directory", async () => {
     await withTempRoot(async (parent) => {

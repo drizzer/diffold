@@ -1,6 +1,6 @@
 {
   "name": "diffold",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Compare directories and show differences with color-coded output",
   "type": "module",
   "packageManager": "bun@1.4.0",
@@ -40,13 +40,15 @@
   ],
   "keywords": [
     "directory",
+    "folder",
     "diff",
     "comparison",
     "cli",
     "bun",
     "node",
     "deno",
-    "typescript"
+    "typescript",
+    "folder-diff"
   ],
   "license": "MIT",
   "author": "drizzer",

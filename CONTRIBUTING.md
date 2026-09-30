@@ -11,6 +11,7 @@ diffold <dir1> <dir2> [... <dirN>] [options]
 | Option | Effect |
 |--------|--------|
 | `-c`, `--no-content` | Compare paths only (content comparison is on by default) |
+| `--json` | Emit one machine-readable JSON report to stdout |
 
 ## Development Setup
 

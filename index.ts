@@ -48,11 +48,16 @@ const RUNNER = "diffold";
 const rawArgs = process.argv.slice(2);
 const rawDirs: string[] = [];
 let compareContent = true;
+let jsonOutput = false;
 
 for (let i = 0; i < rawArgs.length; i++) {
   const arg = rawArgs[i];
   if (arg === "-c" || arg === "--no-content") {
     compareContent = false;
+    continue;
+  }
+  if (arg === "--json") {
+    jsonOutput = true;
     continue;
   }
   if (arg.startsWith("-") && arg !== "-") {
@@ -69,6 +74,7 @@ if (rawDirs.length < 2 || rawDirs.length > 5) {
   console.error(
     `${RED}Options: -c, --no-content  Compare paths only (content comparison is on by default)${RESET}`,
   );
+  console.error(`${RED}         --json            Print a machine-readable report to stdout${RESET}`);
   process.exit(1);
 }
 
@@ -258,6 +264,22 @@ interface ContentDifference {
   groups: number[][];
 }
 
+interface JsonReport {
+  schemaVersion: 1;
+  contentComparison: "sha256" | "disabled";
+  folders: Array<{
+    path: string;
+    totalFiles: number;
+    skippedDirectories: string[];
+  }>;
+  unique: string[][];
+  missing: string[][];
+  common: string[];
+  identical: string[];
+  modified: ContentDifference[];
+  incomplete: boolean;
+}
+
 async function fingerprintFile(filePath: string): Promise<FileFingerprint> {
   const handle = await fs.open(filePath, "r");
   try {
@@ -315,6 +337,103 @@ async function compareCommonContent(
   return differences;
 }
 
+function getFolderDifferences(fileSets: Set<string>[]): {
+  unique: Set<string>[];
+  missing: Set<string>[];
+} {
+  const unique: Set<string>[] = [];
+  const missing: Set<string>[] = [];
+
+  for (let i = 0; i < fileSets.length; i++) {
+    let othersUnion = new Set<string>();
+    for (let j = 0; j < fileSets.length; j++) {
+      if (i !== j) {
+        for (const file of fileSets[j]) othersUnion.add(file);
+      }
+    }
+    unique.push(new Set(
+      [...fileSets[i]].filter((file) => !othersUnion.has(file)),
+    ));
+    missing.push(new Set(
+      [...othersUnion].filter((file) => !fileSets[i].has(file)),
+    ));
+  }
+
+  return { unique, missing };
+}
+
+function getCommonFiles(fileSets: Set<string>[]): Set<string> {
+  let common = fileSets[0] || new Set<string>();
+  for (let i = 1; i < fileSets.length; i++) {
+    common = new Set([...common].filter((file) => fileSets[i].has(file)));
+  }
+  return common;
+}
+
+function printHumanReport(
+  differences: { unique: Set<string>[]; missing: Set<string>[] },
+  commonAll: Set<string>,
+  contentDifferences: ContentDifference[],
+  identicalCount: number,
+): void {
+  console.log(
+    `${YELLOW}\n=== Folder Diff Report (${validFiles.length} valid folders) ===\n${RESET}`,
+  );
+
+  for (let i = 0; i < validFiles.length; i++) {
+    const unique = differences.unique[i];
+    const missing = differences.missing[i];
+    console.log(
+      `Folder ${i + 1}: ${validFiles[i].size} total files (${BLUE}${sanitizeForDisplay(validDirs[i])}${RESET}):`,
+    );
+    const uniqueColor = unique.size > 0 ? RED : "";
+    const missingColor = missing.size > 0 ? RED : "";
+    const skippedCount = skippedDirsByFolder[i]?.length ?? 0;
+    const skippedNote = skippedCount > 0
+      ? ` [${skippedCount} director${skippedCount === 1 ? "y" : "ies"} skipped]`
+      : "";
+    console.log(
+      `  Unique: ${uniqueColor}${unique.size}${RESET} | Missing: ${missingColor}${missing.size}${RESET}${skippedNote}`,
+    );
+    if (unique.size > 0) {
+      console.log("  Unique files:");
+      [...unique].sort().forEach((file) => console.log(`    ${sanitizeForDisplay(file)}`));
+    }
+    if (missing.size > 0) {
+      console.log("  Missing files:");
+      [...missing].sort().forEach((file) => console.log(`    ${sanitizeForDisplay(file)}`));
+    }
+    console.log("");
+  }
+
+  console.log(
+    `Common to all ${validFiles.length} folders: ${GREEN}${commonAll.size}${RESET} files`,
+  );
+  if (compareContent) {
+    console.log(
+      `Content: ${GREEN}${identicalCount} identical${RESET} | ${contentDifferences.length > 0 ? RED : ""}${contentDifferences.length} changed${RESET}`,
+    );
+    if (contentDifferences.length > 0) {
+      console.log("  Changed files:");
+      for (const difference of contentDifferences) {
+        const groups = difference.groups
+          .map((group) => `Folders ${group.map((index) => index + 1).join(", ")}`)
+          .join(" != ");
+        console.log(`    ${sanitizeForDisplay(difference.path)}: ${groups}`);
+      }
+    }
+  } else {
+    console.log("Content: comparison disabled (-c)");
+  }
+
+  console.log(
+    `${YELLOW}\nSupports ~ (home) for linux/windows and both forward and back slashes: / \\ as separators.${RESET}`,
+  );
+  console.log(
+    `${YELLOW}Supports Windows drives (f:/   f:\\   f://   f:\\\\  and  f:)${RESET}`,
+  );
+}
+
 async function main() {
   // Collect every validation error before deciding. A user who asked for
   // three folders and mistyped one must get an error, not a silent two-folder
@@ -344,86 +463,44 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(
-    `${YELLOW}\n=== Folder Diff Report (${validFiles.length} valid folders) ===\n${RESET}`,
-  );
-
-  for (let i = 0; i < validFiles.length; i++) {
-    let othersUnion = new Set<string>();
-    for (let j = 0; j < validFiles.length; j++) {
-      if (i !== j) {
-        for (const f of validFiles[j]) othersUnion.add(f);
-      }
-    }
-    const unique = new Set(
-      [...validFiles[i]].filter((f) => !othersUnion.has(f)),
-    );
-    const missing = new Set(
-      [...othersUnion].filter((f) => !validFiles[i].has(f)),
-    );
-
-    console.log(
-      `Folder ${i + 1}: ${validFiles[i].size} total files (${BLUE}${sanitizeForDisplay(validDirs[i])}${RESET}):`,
-    );
-    const uniqueColor = unique.size > 0 ? RED : "";
-    const missingColor = missing.size > 0 ? RED : "";
-    const skippedCount = skippedDirsByFolder[i]?.length ?? 0;
-    const skippedNote = skippedCount > 0
-      ? ` [${skippedCount} director${skippedCount === 1 ? "y" : "ies"} skipped]`
-      : "";
-    console.log(
-      `  Unique: ${uniqueColor}${unique.size}${RESET} | Missing: ${missingColor}${missing.size}${RESET}${skippedNote}`,
-    );
-    if (unique.size > 0) {
-      console.log("  Unique files:");
-      [...unique].sort().forEach((f) => console.log(`    ${sanitizeForDisplay(f)}`));
-    }
-    if (missing.size > 0) {
-      console.log("  Missing files:");
-      [...missing].sort().forEach((f) => console.log(`    ${sanitizeForDisplay(f)}`));
-    }
-    console.log("");
-  }
-
-  // Common to ALL valid
-  let commonAll = validFiles[0] || new Set();
-  for (let i = 1; i < validFiles.length; i++) {
-    commonAll = new Set([...commonAll].filter((f) => validFiles[i].has(f)));
-  }
-  console.log(
-    `Common to all ${validFiles.length} folders: ${GREEN}${commonAll.size}${RESET} files`,
-  );
-
-  if (compareContent) {
-    const contentDifferences = await compareCommonContent(validDirs, commonAll);
-    const identicalCount = commonAll.size - contentDifferences.length;
-    console.log(
-      `Content: ${GREEN}${identicalCount} identical${RESET} | ${contentDifferences.length > 0 ? RED : ""}${contentDifferences.length} changed${RESET}`,
-    );
-    if (contentDifferences.length > 0) {
-      console.log("  Changed files:");
-      for (const difference of contentDifferences) {
-        const groups = difference.groups
-          .map((group) => `Folders ${group.map((index) => index + 1).join(", ")}`)
-          .join(" != ");
-        console.log(`    ${sanitizeForDisplay(difference.path)}: ${groups}`);
-      }
-    }
-  } else {
-    console.log("Content: comparison disabled (-c)");
-  }
-
-  console.log(
-    `${YELLOW}\nSupports ~ (home) for linux/windows and both forward and back slashes: / \\ as separators.${RESET}`,
-  );
-  console.log(
-    `${YELLOW}Supports Windows drives (f:/   f:\\   f://   f:\\\\  and  f:)${RESET}`,
-  );
-
+  const differences = getFolderDifferences(validFiles);
+  const commonAll = getCommonFiles(validFiles);
+  const contentDifferences = await compareCommonContent(validDirs, commonAll);
+  const modifiedPaths = new Set(contentDifferences.map((item) => item.path));
+  const identicalPaths = compareContent
+    ? [...commonAll].filter((file) => !modifiedPaths.has(file)).sort()
+    : [];
   const totalSkipped = skippedDirsByFolder.reduce(
     (total, skipped) => total + skipped.length,
     0,
   );
+
+  if (jsonOutput) {
+    const report: JsonReport = {
+      schemaVersion: 1,
+      contentComparison: compareContent ? "sha256" : "disabled",
+      folders: validDirs.map((folder, index) => ({
+        path: folder,
+        totalFiles: validFiles[index].size,
+        skippedDirectories: [...(skippedDirsByFolder[index] ?? [])].sort(),
+      })),
+      unique: differences.unique.map((files) => [...files].sort()),
+      missing: differences.missing.map((files) => [...files].sort()),
+      common: [...commonAll].sort(),
+      identical: identicalPaths,
+      modified: contentDifferences,
+      incomplete: totalSkipped > 0,
+    };
+    console.log(JSON.stringify(report, null, 2));
+  } else {
+    printHumanReport(
+      differences,
+      commonAll,
+      contentDifferences,
+      identicalPaths.length,
+    );
+  }
+
   if (totalSkipped > 0) {
     console.error(
       `${YELLOW}WARNING: Comparison incomplete — ${totalSkipped} director${totalSkipped === 1 ? "y was" : "ies were"} skipped due to read errors${RESET}`,
