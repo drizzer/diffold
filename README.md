@@ -39,6 +39,7 @@ diffold dir1 dir2 dir3
 - Content-aware comparison with streaming SHA-256 hashing (disable with `-c`)
 - Versioned JSON output for CI, scripts, and piping to tools such as `jq`
 - Repeatable glob exclusions for files, directory names, and subtrees
+- Summary-first output that stays readable on large trees, with `--verbose` and `--quiet`
 - Color-coded terminal output
 - Unique, missing, and common file counts
 - Recursive directory traversal
@@ -62,6 +63,8 @@ Options:
 | `-c`, `--no-content` | Compare paths only. Content comparison is enabled by default. |
 | `--json` | Print a machine-readable JSON report to stdout. |
 | `-e`, `--exclude <glob>` | Exclude matching files/directories; repeat for multiple patterns. |
+| `-v`, `--verbose` | Print every entry instead of truncating long lists. |
+| `-q`, `--quiet` | Print only summary counts, no file lists. |
 
 ## Excluding Files
 
@@ -88,6 +91,21 @@ diffold dir1 dir2 --json | jq '.modified'
 The JSON contract includes `schemaVersion: 1`, folder metadata, `unique`, `missing`,
 `common`, `identical`, `modified`, and `incomplete`. Human-readable help text remains
 on stderr for usage errors, so successful JSON output is never mixed with diagnostics.
+
+## Output Volume
+
+File lists are capped at **20 entries per section** by default, followed by
+`... and N more (use --verbose to show all)`. On a real 684-vs-584-file comparison
+this keeps the report at ~118 lines instead of ~592.
+
+```bash
+diffold dir1 dir2              # counts + first 20 entries per section
+diffold dir1 dir2 --verbose    # every entry (or -v)
+diffold dir1 dir2 --quiet      # summary counts only, no file lists (or -q)
+```
+
+`--json` is never truncated, regardless of these flags — machine consumers always
+receive the complete report.
 
 ## Behavior & Limits
 

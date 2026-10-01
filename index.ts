@@ -50,6 +50,8 @@ const rawDirs: string[] = [];
 const excludePatterns: string[] = [];
 let compareContent = true;
 let jsonOutput = false;
+let verbose = false;
+let quiet = false;
 
 for (let i = 0; i < rawArgs.length; i++) {
   const arg = rawArgs[i];
@@ -59,6 +61,14 @@ for (let i = 0; i < rawArgs.length; i++) {
   }
   if (arg === "--json") {
     jsonOutput = true;
+    continue;
+  }
+  if (arg === "-v" || arg === "--verbose") {
+    verbose = true;
+    continue;
+  }
+  if (arg === "-q" || arg === "--quiet") {
+    quiet = true;
     continue;
   }
   if (arg === "-e" || arg === "--exclude") {
@@ -87,6 +97,11 @@ for (let i = 0; i < rawArgs.length; i++) {
   rawDirs.push(arg);
 }
 
+if (verbose && quiet) {
+  console.error(`${RED}ERROR: --verbose and --quiet cannot be combined${RESET}`);
+  process.exit(1);
+}
+
 if (rawDirs.length < 2 || rawDirs.length > 5) {
   console.error(
     `${RED}Usage: ${RUNNER} <dir1> <dir2> [... <dirN>] [options] (2-5 directories)${RESET}`,
@@ -95,6 +110,8 @@ if (rawDirs.length < 2 || rawDirs.length > 5) {
     `${RED}Options: -c, --no-content  Compare paths only (content comparison is on by default)${RESET}`,
   );
   console.error(`${RED}         --json            Print a machine-readable report to stdout${RESET}`);
+  console.error(`${RED}         -v, --verbose     Print every entry instead of truncating long lists${RESET}`);
+  console.error(`${RED}         -q, --quiet       Print only summary counts${RESET}`);
   console.error(`${RED}Options: -e, --exclude <glob>  Exclude matching files/directories (repeatable)${RESET}`);
   process.exit(1);
 }
@@ -442,12 +459,58 @@ function getCommonFiles(fileSets: Set<string>[]): Set<string> {
   return common;
 }
 
+// Long file lists make a report unreadable on real trees (a 684-vs-584-file
+// comparison produced ~592 lines), so each section is capped unless --verbose.
+const DEFAULT_LIST_LIMIT = 20;
+
+function printList(
+  heading: string,
+  entries: Set<string>,
+  render: (entry: string) => string,
+): void {
+  const sorted = [...entries].sort();
+  if (sorted.length === 0) return;
+
+  const shown = verbose ? sorted : sorted.slice(0, DEFAULT_LIST_LIMIT);
+  console.log(`  ${heading}`);
+  for (const entry of shown) {
+    console.log(`    ${render(entry)}`);
+  }
+  if (shown.length < sorted.length) {
+    const hidden = sorted.length - shown.length;
+    console.log(
+      `    ${YELLOW}... and ${hidden} more (use --verbose to show all)${RESET}`,
+    );
+  }
+}
+
 function printHumanReport(
   differences: { unique: Set<string>[]; missing: Set<string>[] },
   commonAll: Set<string>,
   contentDifferences: ContentDifference[],
   identicalCount: number,
 ): void {
+  const totalUnique = differences.unique.reduce((sum, files) => sum + files.size, 0);
+  const totalMissing = differences.missing.reduce((sum, files) => sum + files.size, 0);
+
+  if (quiet) {
+    for (let i = 0; i < validFiles.length; i++) {
+      console.log(
+        `Folder ${i + 1}: ${validFiles[i].size} files, ${differences.unique[i].size} unique, ${differences.missing[i].size} missing`,
+      );
+    }
+    console.log(`Common to all ${validFiles.length} folders: ${commonAll.size} files`);
+    console.log(
+      compareContent
+        ? `Content: ${identicalCount} identical, ${contentDifferences.length} changed`
+        : "Content: comparison disabled (-c)",
+    );
+    console.log(
+      `Totals: ${totalUnique} unique entries, ${totalMissing} missing entries`,
+    );
+    return;
+  }
+
   console.log(
     `${YELLOW}\n=== Folder Diff Report (${validFiles.length} valid folders) ===\n${RESET}`,
   );
@@ -467,14 +530,8 @@ function printHumanReport(
     console.log(
       `  Unique: ${uniqueColor}${unique.size}${RESET} | Missing: ${missingColor}${missing.size}${RESET}${skippedNote}`,
     );
-    if (unique.size > 0) {
-      console.log("  Unique files:");
-      [...unique].sort().forEach((file) => console.log(`    ${sanitizeForDisplay(file)}`));
-    }
-    if (missing.size > 0) {
-      console.log("  Missing files:");
-      [...missing].sort().forEach((file) => console.log(`    ${sanitizeForDisplay(file)}`));
-    }
+    printList("Unique files:", unique, (file) => sanitizeForDisplay(file));
+    printList("Missing files:", missing, (file) => sanitizeForDisplay(file));
     console.log("");
   }
 
@@ -486,12 +543,21 @@ function printHumanReport(
       `Content: ${GREEN}${identicalCount} identical${RESET} | ${contentDifferences.length > 0 ? RED : ""}${contentDifferences.length} changed${RESET}`,
     );
     if (contentDifferences.length > 0) {
+      const shown = verbose
+        ? contentDifferences
+        : contentDifferences.slice(0, DEFAULT_LIST_LIMIT);
       console.log("  Changed files:");
-      for (const difference of contentDifferences) {
+      for (const difference of shown) {
         const groups = difference.groups
           .map((group) => `Folders ${group.map((index) => index + 1).join(", ")}`)
           .join(" != ");
         console.log(`    ${sanitizeForDisplay(difference.path)}: ${groups}`);
+      }
+      if (shown.length < contentDifferences.length) {
+        const hidden = contentDifferences.length - shown.length;
+        console.log(
+          `    ${YELLOW}... and ${hidden} more (use --verbose to show all)${RESET}`,
+        );
       }
     }
   } else {

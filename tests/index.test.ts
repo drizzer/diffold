@@ -424,6 +424,105 @@ describe("diffold CLI", () => {
     });
   });
 
+
+  it("truncates long lists by default and lists everything with --verbose", async () => {
+    await withTempRoot(async (parent) => {
+      const layout: Record<string, string> = {};
+      for (let index = 0; index < 45; index++) {
+        layout[`file-${String(index).padStart(2, "0")}.txt`] = "content";
+      }
+      const a = await makeTree(parent, "trunc-a", layout);
+      const b = await makeTree(parent, "trunc-b", { "only-b.txt": "b" });
+
+      const truncated = plain((await runDiffold([a, b])).stdout);
+      const verbose = plain((await runDiffold([a, b, "--verbose"])).stdout);
+      const shortFlag = plain((await runDiffold([a, b, "-v"])).stdout);
+
+      // Folder 1 owns 45 unique files, so only the first 20 are listed.
+      assert.ok(truncated.includes("... and 25 more (use --verbose to show all)"));
+      assert.ok(!truncated.includes("file-20.txt"));
+      // Both folder sections truncate: 45 unique in folder 1, 45 missing in folder 2.
+      assert.strictEqual(
+        truncated.split("use --verbose to show all").length - 1,
+        2,
+      );
+
+      assert.ok(!verbose.includes("use --verbose to show all"));
+      assert.ok(verbose.includes("file-44.txt"));
+      assert.strictEqual(shortFlag, verbose);
+    });
+  });
+
+  it("truncates the changed-files list by default", async () => {
+    await withTempRoot(async (parent) => {
+      const aLayout: Record<string, string> = {};
+      const bLayout: Record<string, string> = {};
+      for (let index = 0; index < 30; index++) {
+        const name = `common-${String(index).padStart(2, "0")}.txt`;
+        aLayout[name] = "a";
+        bLayout[name] = "b";
+      }
+      const a = await makeTree(parent, "changed-trunc-a", aLayout);
+      const b = await makeTree(parent, "changed-trunc-b", bLayout);
+
+      const truncated = plain((await runDiffold([a, b])).stdout);
+      const verbose = plain((await runDiffold([a, b, "--verbose"])).stdout);
+
+      assert.ok(truncated.includes("Content: 0 identical | 30 changed"));
+      assert.ok(truncated.includes("... and 10 more (use --verbose to show all)"));
+      assert.ok(!truncated.includes("common-25.txt"));
+      assert.ok(verbose.includes("common-29.txt"));
+      assert.ok(!verbose.includes("use --verbose to show all"));
+    });
+  });
+
+  it("prints only summary counts with --quiet", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "quiet-a", { "shared.txt": "a", "only-a.txt": "a" });
+      const b = await makeTree(parent, "quiet-b", { "shared.txt": "b", "only-b.txt": "b" });
+
+      const result = await runDiffold([a, b, "--quiet"]);
+      const output = plain(result.stdout);
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.ok(output.includes("Folder 1: 2 files, 1 unique, 1 missing"));
+      assert.ok(output.includes("Folder 2: 2 files, 1 unique, 1 missing"));
+      assert.ok(output.includes("Common to all 2 folders: 1 files"));
+      assert.ok(output.includes("Content: 0 identical, 1 changed"));
+      assert.ok(output.includes("Totals: 2 unique entries, 2 missing entries"));
+      assert.ok(!output.includes("Folder Diff Report"));
+      assert.ok(!output.includes("only-a.txt"));
+      assert.ok(!output.includes("Supports ~"));
+      assert.ok(!result.stdout.includes("\u001b["));
+    });
+  });
+
+  it("rejects combining --verbose and --quiet", async () => {
+    const result = await runDiffold([FIXTURE_DIR1, FIXTURE_DIR2, "-v", "-q"]);
+
+    assert.strictEqual(result.exitCode, 1);
+    assert.strictEqual(result.stdout, "");
+    assert.ok(result.stderr.includes("--verbose and --quiet cannot be combined"));
+  });
+
+  it("keeps JSON output complete regardless of verbosity flags", async () => {
+    await withTempRoot(async (parent) => {
+      const layout: Record<string, string> = {};
+      for (let index = 0; index < 30; index++) {
+        layout[`file-${String(index).padStart(2, "0")}.txt`] = "content";
+      }
+      const a = await makeTree(parent, "json-limit-a", layout);
+      const b = await makeTree(parent, "json-limit-b", layout);
+
+      const report = JSON.parse((await runDiffold([a, b, "--json"])).stdout);
+      const quietReport = JSON.parse((await runDiffold([a, b, "--json", "--quiet"])).stdout);
+
+      assert.strictEqual(report.common.length, 30);
+      assert.strictEqual(quietReport.common.length, 30);
+      assert.deepStrictEqual(quietReport, report);
+    });
+  });
+
   it("requires a pattern for --exclude", async () => {
     const result = await runDiffold([FIXTURE_DIR1, FIXTURE_DIR2, "--exclude"]);
 

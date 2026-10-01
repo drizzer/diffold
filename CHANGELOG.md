@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.6] — 2026-10-01
+
+### Added
+
+- Cap file lists at 20 entries per section by default, with `--verbose` for full output and `--quiet` for summary-only output.
+
 ## [0.0.5] — 2026-10-01
 
 ### Added
