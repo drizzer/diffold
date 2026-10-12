@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="diffold favicon">
+  <rect x="1" y="1" width="62" height="62" rx="15" fill="#23272f" stroke="#3a4150" stroke-width="1.5"/>
+  <rect x="10" y="16" width="13" height="13" rx="4" fill="#98c379"/>
+  <rect x="25.5" y="16" width="13" height="13" rx="4" fill="#98c379"/>
+  <rect x="41" y="16" width="13" height="13" rx="4" fill="#98c379"/>
+  <rect x="10" y="35" width="13" height="13" rx="4" fill="#98c379"/>
+  <rect x="27.75" y="37.25" width="8.5" height="8.5" rx="3" fill="none" stroke="#9aa3b2" stroke-width="2"/>
+  <rect x="41" y="35" width="13" height="13" rx="4" fill="#e06c75"/>
+</svg>

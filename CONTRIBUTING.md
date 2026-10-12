@@ -53,7 +53,7 @@ index.ts                  # Entire CLI implementation (intentionally single-file
 types/cross-runtime.d.ts  # Deno/Bun global type declarations
 tests/index.test.ts       # Test suite, exercised through the CLI as a subprocess
 docs/                     # Local maintainer docs (gitignored, not shipped)
-.github/workflows/        # ci.yml and publish.yml
+.github/workflows/        # checks.yml, publish-npm.yml, pages.yml
 ```
 
 `index.ts` is deliberately a single file so the compiled CLI has **zero runtime
@@ -66,7 +66,7 @@ dependencies**. Do not split it without a strong reason and a changelog note.
 3. Type check: `bun run typecheck`.
 4. Run the suite on every supported runtime:
    `bun run test && bun test` (and `bun run test:deno` if you touched runtime
-   conditionals). The suite currently has 32 tests.
+   conditionals). The suite currently has 50 tests.
 5. Build and smoke test:
    `bun run build && node dist/index.js tests/test-folders/test_dir1 tests/test-folders/test_dir2`
 6. Open a pull request.

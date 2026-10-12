@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/logo.svg" alt="diffold logo — folder tiles with one changed file highlighted" width="72">
+
 # diffold
 
 Compare 2–5 directories and see which files are unique, missing, and common across them.
@@ -10,7 +12,7 @@ Compare 2–5 directories and see which files are unique, missing, and common ac
 [![license](https://img.shields.io/npm/l/diffold)](./LICENSE)
 [![node](https://img.shields.io/node/v/diffold)](https://nodejs.org/)
 [![deno](https://img.shields.io/badge/deno-2.x%20best--effort-black?logo=deno)](https://deno.com/)
-[![CI](https://github.com/drizzer/diffold/actions/workflows/ci.yml/badge.svg)](https://github.com/drizzer/diffold/actions/workflows/ci.yml)
+[![CI](https://github.com/drizzer/diffold/actions/workflows/checks.yml/badge.svg)](https://github.com/drizzer/diffold/actions/workflows/checks.yml)
 [![zero runtime dependencies](https://img.shields.io/badge/zero%20runtime%20dependencies-brightgreen)](./package.json)
 
 <img src="assets/demo.svg" alt="Terminal output of diffold comparing two folders, showing color-coded unique, missing, and common file counts" width="580">
@@ -40,6 +42,9 @@ diffold dir1 dir2 dir3
 - Versioned JSON output for CI, scripts, and piping to tools such as `jq`
 - Repeatable glob exclusions for files, directory names, and subtrees
 - Summary-first output that stays readable on large trees, with `--verbose` and `--quiet`
+- Report file output with `-f`, extension inference, and overwrite protection
+- CI-friendly exit codes with an opt-in `--fail-on-diff` gate
+- Matrix presence table by default (`--matrix`/`-m`), with `--list`/`-l` for per-folder lists; rows where every folder agrees are hidden unless `--verbose`
 - Color-coded terminal output
 - Unique, missing, and common file counts
 - Recursive directory traversal
@@ -65,6 +70,11 @@ Options:
 | `-e`, `--exclude <glob>` | Exclude matching files/directories; repeat for multiple patterns. |
 | `-v`, `--verbose` | Print every entry instead of truncating long lists. |
 | `-q`, `--quiet` | Print only summary counts, no file lists. |
+| `-f [path]`, `--file`, `--output` | Write the report to a file instead of stdout. |
+| `--force` | Allow `-f` to overwrite an existing file. |
+| `--fail-on-diff` | Exit `1` when differences are found (CI gate). |
+| `--matrix`, `-m` | Per-file presence matrix (default view). |
+| `--list`, `-l` | Per-folder unique/missing lists instead. |
 
 ## Excluding Files
 
@@ -107,10 +117,30 @@ diffold dir1 dir2 --quiet      # summary counts only, no file lists (or -q)
 `--json` is never truncated, regardless of these flags — machine consumers always
 receive the complete report.
 
+## Report Files
+
+`-f` writes the report to a file instead of stdout. It works with both formats and
+infers the extension:
+
+```bash
+diffold dir1 dir2 -f                        # ./diffold-report.txt
+diffold dir1 dir2 -f out/report             # ./out/report.txt (dirs created)
+diffold dir1 dir2 --json -f report          # ./report.json
+diffold dir1 dir2 --json -f report.custom   # ./report.custom (extension respected)
+```
+
+- stdout stays **completely empty**; the `Report saved to ...` confirmation goes to
+  stderr, so a piped stdout is never contaminated.
+- An existing file is never overwritten without `--force`.
+- When `-f` has no path, or the following token would leave fewer than two
+  directories, the default file name is used. This keeps `diffold a -f b` meaning
+  "compare a and b" rather than swallowing `b` as the output path.
+- For CI, prefer `--json` with shell redirection; `-f` is for artifacts and humans.
+
 ## Behavior & Limits
 
 - Requires 2 to 5 directory paths. Every requested folder must validate; if
-  any folder cannot be used, diffold reports each bad argument and exits 1.
+  any folder cannot be used, diffold reports each bad argument and exits 2.
 - Compares file presence by relative path and hashes files present in every folder to
   identify identical versus changed content. Use `-c` / `--no-content` to skip hashing.
 - Skips symbolic links, and ignores entries that resolve outside a compared folder.
@@ -135,7 +165,7 @@ are pruned before traversal.
   are not expanded into the current home directory.
 - Subdirectories that cannot be read are reported as `[skip] ...` on stderr,
   marked per folder in the report, followed by a `WARNING: Comparison
-  incomplete` message; the CLI then exits 1 so scripts do not treat a partial
+  incomplete` message; the CLI then exits 2 so scripts do not treat a partial
   report as success.
 - File names, printed paths, and error messages are stripped of ANSI/control sequences,
   so a crafted name cannot rewrite your terminal.
@@ -146,6 +176,71 @@ are pruned before traversal.
   it resolves the binary path but never links the package into the global
   `node_modules`. Run `bun install -g diffold` once (then `bunx diffold`
   works), or use `npx diffold@latest` instead.
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Comparison completed (differences may be present) |
+| `1` | Differences found — **only** when `--fail-on-diff` is used |
+| `2` | Usage error, invalid folder, traversal limit, or write failure |
+
+Differences only produce exit `1` when you opt in with `--fail-on-diff`, so existing
+scripts that check for success keep working. An incomplete comparison is always `2`,
+never `1`, so a partial report is never mistaken for a clean result.
+
+```bash
+# Fail the build when the trees differ
+diffold dir1 dir2 --quiet --fail-on-diff
+
+# Same, with a machine-readable report
+diffold dir1 dir2 --json --fail-on-diff > report.json
+```
+
+## Matrix View
+
+The default view shows one row per file and one column per folder, which is much
+easier to scan than separate unique/missing lists when comparing 3–5 directories.
+
+```bash
+diffold dir1 dir2 dir3            # matrix (default)
+diffold dir1 dir2 dir3 --list     # per-folder lists, or -l
+diffold dir1 dir2 dir3 --matrix   # explicit, or -m
+```
+
+```
+=== Presence Matrix (3 valid folders) ===
+
+  File        F1 F2 F3
+  ---------------------
+  only-a.txt  Y  -  -
+  only-b.txt  -  Y  -
+  shared.txt  Y  Y  M
+
+Common to all 3 folders: 1 files
+Content: 0 identical | 1 changed
+1 identical row hidden (use --verbose to show all)
+Legend: Y present  - absent  M modified (differs from every other folder)
+```
+
+- `M` marks the folder holding a variant that **no other folder shares**, so the odd
+  one out is immediately visible. When several folders agree, they show `Y`.
+- Rows where **every** folder agrees are hidden by default — they carry no
+  information when you are looking for what differs. The count is reported in the
+  summary and `--verbose` reveals every row.
+- List rows are capped at 20 per section; `--verbose` prints everything.
+- Suppressed by `--quiet`, and combined with `-f` it writes the matrix to the file.
+- `--list` and `--matrix` together is an error and exits `2`.
+
+On the real 684-vs-584-file skills comparison the matrix renders in 30 lines, versus
+118 for `--list` and 592 with `--verbose`.
+
+## Per-Folder Lists
+
+`--list` / `-l` restores the original layout: one block per folder, listing its
+unique and missing files, followed by the shared and content summary. This is the
+right view for two folders, or when you want to know exactly what one tree has that
+another does not.
 
 ## Local Development
 

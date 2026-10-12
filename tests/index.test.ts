@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { spawn } from "node:child_process";
-import { chmod, mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +15,8 @@ const FIXTURE_DIR2 = "tests/test-folders/test_dir2";
 function getRunner(): [string, string[]] {
   if (typeof Deno !== "undefined") {
     // --allow-sys is needed for os.homedir() used by ~ expansion.
-    return ["deno", ["run", "--allow-read", "--allow-env", "--allow-sys", cli]];
+    // --allow-write is needed for -f report files.
+    return ["deno", ["run", "--allow-read", "--allow-write", "--allow-env", "--allow-sys", cli]];
   }
   if ("Bun" in globalThis) {
     return [process.execPath, ["run", cli]];
@@ -24,11 +25,22 @@ function getRunner(): [string, string[]] {
   return [process.execPath, ["--import", "tsx", cli]];
 }
 
+async function exists(target: string): Promise<boolean> {
+  try {
+    await stat(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function runDiffold(
   args: string[],
   env: Record<string, string> = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const [cmd, baseArgs] = getRunner();
+  // Always spawn from the repo root: the Node runner resolves the `tsx` loader
+  // relative to cwd, so a different cwd cannot start the CLI at all.
   const proc = spawn(cmd, [...baseArgs, ...args], {
     cwd: root,
     stdio: ["inherit", "pipe", "pipe"],
@@ -108,7 +120,7 @@ function plain(text: string): string {
 
 describe("diffold CLI", () => {
   it("reports unique, missing, and common files for two folders", async () => {
-    const result = await runDiffold([FIXTURE_DIR1, FIXTURE_DIR2]);
+    const result = await runDiffold([FIXTURE_DIR1, FIXTURE_DIR2, "--list"]);
 
     assert.strictEqual(result.exitCode, 0);
     assert.strictEqual(result.stderr, "");
@@ -122,7 +134,7 @@ describe("diffold CLI", () => {
   });
 
   it("keeps common files out of the unique and missing lists", async () => {
-    const result = await runDiffold([FIXTURE_DIR1, FIXTURE_DIR2]);
+    const result = await runDiffold([FIXTURE_DIR1, FIXTURE_DIR2, "--list"]);
 
     const unique = listUnder("Unique files:", result.stdout).sort();
     const missing = listUnder("Missing files:", result.stdout);
@@ -150,7 +162,7 @@ describe("diffold CLI", () => {
         "only-c.txt": "c",
       });
 
-      const result = await runDiffold([a, b, c]);
+      const result = await runDiffold([a, b, c, "--list"]);
 
       assert.strictEqual(result.exitCode, 0);
       assert.strictEqual(result.stderr, "");
@@ -170,7 +182,7 @@ describe("diffold CLI", () => {
       const empty = await makeTree(parent, "empty", {});
       const other = await makeTree(parent, "other", { "file.txt": "x" });
 
-      const result = await runDiffold([empty, other]);
+      const result = await runDiffold([empty, other, "--list"]);
 
       assert.strictEqual(result.exitCode, 0);
       assert.strictEqual(result.stderr, "");
@@ -203,7 +215,7 @@ describe("diffold CLI", () => {
         "plain.txt": "x",
       });
 
-      const result = await runDiffold([dir, reference]);
+      const result = await runDiffold([dir, reference, "--list"]);
       const output = plain(result.stdout);
 
       assert.strictEqual(result.exitCode, 0);
@@ -222,7 +234,7 @@ describe("diffold CLI", () => {
         "sub/b.txt": "b",
       });
 
-      const result = await runDiffold([dir, dir]);
+      const result = await runDiffold([dir, dir, "--list"]);
       const output = plain(result.stdout);
 
       assert.strictEqual(result.exitCode, 0);
@@ -247,7 +259,7 @@ describe("diffold CLI", () => {
         "right.txt": "right only",
       });
 
-      const result = await runDiffold([a, b]);
+      const result = await runDiffold([a, b, "--list"]);
       const output = plain(result.stdout);
 
       assert.strictEqual(result.exitCode, 0);
@@ -264,7 +276,7 @@ describe("diffold CLI", () => {
       const b = await makeTree(parent, "groups-b", { "shared.txt": "b" });
       const c = await makeTree(parent, "groups-c", { "shared.txt": "a" });
 
-      const result = await runDiffold([a, b, c]);
+      const result = await runDiffold([a, b, c, "--list"]);
       const output = plain(result.stdout);
 
       assert.strictEqual(result.exitCode, 0);
@@ -362,7 +374,7 @@ describe("diffold CLI", () => {
         spellings.push(forwardSlashes.replace(/^[A-Za-z]:/, (drive) => drive.toLowerCase()));
       }
 
-      const result = await runDiffold(spellings);
+      const result = await runDiffold([...spellings, "--list"]);
       const output = plain(result.stdout);
 
       assert.strictEqual(result.exitCode, 0);
@@ -400,6 +412,7 @@ describe("diffold CLI", () => {
         "node_modules",
         "--exclude",
         "build/**",
+        "--list",
       ], { DIFFOLD_MAX_FILES: "4" });
       const report = JSON.parse((await runDiffold([
         a,
@@ -434,9 +447,9 @@ describe("diffold CLI", () => {
       const a = await makeTree(parent, "trunc-a", layout);
       const b = await makeTree(parent, "trunc-b", { "only-b.txt": "b" });
 
-      const truncated = plain((await runDiffold([a, b])).stdout);
-      const verbose = plain((await runDiffold([a, b, "--verbose"])).stdout);
-      const shortFlag = plain((await runDiffold([a, b, "-v"])).stdout);
+      const truncated = plain((await runDiffold([a, b, "--list"])).stdout);
+      const verbose = plain((await runDiffold([a, b, "--verbose", "--list"])).stdout);
+      const shortFlag = plain((await runDiffold([a, b, "-v", "--list"])).stdout);
 
       // Folder 1 owns 45 unique files, so only the first 20 are listed.
       assert.ok(truncated.includes("... and 25 more (use --verbose to show all)"));
@@ -465,8 +478,8 @@ describe("diffold CLI", () => {
       const a = await makeTree(parent, "changed-trunc-a", aLayout);
       const b = await makeTree(parent, "changed-trunc-b", bLayout);
 
-      const truncated = plain((await runDiffold([a, b])).stdout);
-      const verbose = plain((await runDiffold([a, b, "--verbose"])).stdout);
+      const truncated = plain((await runDiffold([a, b, "--list"])).stdout);
+      const verbose = plain((await runDiffold([a, b, "--verbose", "--list"])).stdout);
 
       assert.ok(truncated.includes("Content: 0 identical | 30 changed"));
       assert.ok(truncated.includes("... and 10 more (use --verbose to show all)"));
@@ -497,10 +510,105 @@ describe("diffold CLI", () => {
     });
   });
 
+  it("writes a text report file and keeps stdout empty", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "file-a", { "shared.txt": "a", "only-a.txt": "a" });
+      const b = await makeTree(parent, "file-b", { "shared.txt": "b", "only-b.txt": "b" });
+      const target = path.join(parent, "out", "report");
+
+      const result = await runDiffold([a, b, "-f", target, "--list"]);
+      const written = path.join(parent, "out", "report.txt");
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.strictEqual(result.stdout, "");
+      assert.ok(result.stderr.includes("Report saved to"));
+      const content = await readFile(written, "utf8");
+      assert.ok(content.includes("Folder Diff Report"));
+      assert.ok(content.includes("only-a.txt"));
+    });
+  });
+
+  it("writes a JSON report file with a .json extension", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "file-json-a", { "shared.txt": "a" });
+      const b = await makeTree(parent, "file-json-b", { "shared.txt": "b" });
+      const target = path.join(parent, "json", "report.json");
+
+      const result = await runDiffold([a, b, "--json", "-f", target]);
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.strictEqual(result.stdout, "");
+      const parsed = JSON.parse(await readFile(target, "utf8"));
+      assert.strictEqual(parsed.schemaVersion, 1);
+      assert.deepStrictEqual(parsed.modified, [
+        { path: "shared.txt", groups: [[0], [1]] },
+      ]);
+    });
+  });
+
+  it("respects an explicit extension instead of appending one", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "file-ext-a", { "shared.txt": "a" });
+      const b = await makeTree(parent, "file-ext-b", { "shared.txt": "b" });
+      const target = path.join(parent, "custom.data");
+
+      const result = await runDiffold([a, b, "--json", "--file=" + target]);
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.ok(await exists(target));
+      assert.ok(!(await exists(`${target}.json`)));
+    });
+  });
+
+  it("refuses to overwrite an existing report file without --force", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "file-clash-a", { "shared.txt": "a" });
+      const b = await makeTree(parent, "file-clash-b", { "shared.txt": "b" });
+      const target = path.join(parent, "existing.txt");
+      await writeFile(target, "do not lose me");
+
+      const blocked = await runDiffold([a, b, "-f", target, "--list"]);
+      assert.strictEqual(blocked.exitCode, 2);
+      assert.strictEqual(blocked.stdout, "");
+      assert.ok(blocked.stderr.includes("Report file already exists"));
+      assert.strictEqual(await readFile(target, "utf8"), "do not lose me");
+
+      const forced = await runDiffold([a, b, "-f", target, "--force", "--list"]);
+      assert.strictEqual(forced.exitCode, 0);
+      assert.ok((await readFile(target, "utf8")).includes("Folder Diff Report"));
+    });
+  });
+
+  it("does not treat a directory after -f as the output path", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "ambiguous-a", { "shared.txt": "a" });
+      const b = await makeTree(parent, "ambiguous-b", { "shared.txt": "b" });
+
+      // Only one directory follows -f, so it must stay a comparison argument and
+      // the report falls back to the default file name. The CLI is spawned from
+      // the repo root so the tsx loader stays resolvable, so the default file
+      // lands there and is cleaned up afterwards.
+      const defaultFile = path.join(root, "diffold-report.txt");
+      await rm(defaultFile, { force: true });
+      let result;
+      try {
+        result = await runDiffold([a, "-f", b]);
+      } finally {
+        await rm(defaultFile, { force: true });
+      }
+
+      assert.strictEqual(result.exitCode, 0, `stderr was: ${result.stderr}`);
+      assert.strictEqual(result.stdout, "");
+      assert.ok(result.stderr.includes("diffold-report.txt"));
+      // Both directories were compared, so `b` was not swallowed as the path.
+      assert.ok(result.stderr.includes("Report saved to"));
+    });
+  });
+
   it("rejects combining --verbose and --quiet", async () => {
     const result = await runDiffold([FIXTURE_DIR1, FIXTURE_DIR2, "-v", "-q"]);
 
-    assert.strictEqual(result.exitCode, 1);
+    assert.strictEqual(result.exitCode, 2);
     assert.strictEqual(result.stdout, "");
     assert.ok(result.stderr.includes("--verbose and --quiet cannot be combined"));
   });
@@ -523,19 +631,174 @@ describe("diffold CLI", () => {
     });
   });
 
+  it("exits 1 only with --fail-on-diff when differences exist", async () => {
+    await withTempRoot(async (parent) => {
+      const same = await makeTree(parent, "gate-same", { "shared.txt": "a" });
+      const alsoSame = await makeTree(parent, "gate-also-same", { "shared.txt": "a" });
+      const different = await makeTree(parent, "gate-different", { "shared.txt": "b" });
+
+      // Differences present, flag absent: still a success for back-compat.
+      const withoutFlag = await runDiffold([same, different, "--list"]);
+      assert.strictEqual(withoutFlag.exitCode, 0);
+      assert.ok(plain(withoutFlag.stdout).includes("Folder Diff Report"));
+
+      // Differences present with the flag: CI gate fails.
+      const withFlag = await runDiffold([same, different, "--fail-on-diff", "--quiet"]);
+      assert.strictEqual(withFlag.exitCode, 1);
+      assert.ok(plain(withFlag.stdout).includes("Content: 0 identical, 1 changed"));
+
+      // No differences with the flag: success.
+      const noDiff = await runDiffold([same, alsoSame, "--fail-on-diff", "--quiet"]);
+      assert.strictEqual(noDiff.exitCode, 0);
+    });
+  });
+
+  it("detects structural-only differences under --fail-on-diff", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "gate-struct-a", { "only-a.txt": "a" });
+      const b = await makeTree(parent, "gate-struct-b", { "only-b.txt": "b" });
+
+      const result = await runDiffold([a, b, "--fail-on-diff", "--quiet", "-c"]);
+      assert.strictEqual(result.exitCode, 1);
+    });
+  });
+
+  it("treats an incomplete comparison as fatal rather than a difference", async () => {
+    if (process.platform === "win32") return;
+    await withTempRoot(async (parent) => {
+      const locked = await makeTree(parent, "gate-locked", {
+        "visible.txt": "x",
+        "restricted/secret.txt": "x",
+      });
+      const other = await makeTree(parent, "gate-other", { "visible.txt": "x" });
+
+      await chmod(path.join(locked, "restricted"), 0o000);
+      try {
+        const probe = await runDiffold([locked, locked]);
+        if (probe.exitCode === 0) return;
+
+        const result = await runDiffold([locked, other, "--fail-on-diff"]);
+        // 2 = fatal/incomplete, never 1 = differences.
+        assert.strictEqual(result.exitCode, 2);
+        assert.ok(result.stderr.includes("Comparison incomplete"));
+      } finally {
+        await chmod(path.join(locked, "restricted"), 0o700);
+      }
+    });
+  });
+
+  it("keeps JSON output parseable when --fail-on-diff fails the run", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "gate-json-a", { "shared.txt": "a" });
+      const b = await makeTree(parent, "gate-json-b", { "shared.txt": "b" });
+
+      const result = await runDiffold([a, b, "--json", "--fail-on-diff"]);
+      const parsed = JSON.parse(result.stdout);
+
+      assert.strictEqual(result.exitCode, 1);
+      assert.strictEqual(parsed.schemaVersion, 1);
+      assert.deepStrictEqual(parsed.modified, [
+        { path: "shared.txt", groups: [[0], [1]] },
+      ]);
+    });
+  });
+
   it("requires a pattern for --exclude", async () => {
     const result = await runDiffold([FIXTURE_DIR1, FIXTURE_DIR2, "--exclude"]);
 
-    assert.strictEqual(result.exitCode, 1);
+    assert.strictEqual(result.exitCode, 2);
     assert.strictEqual(result.stdout, "");
     assert.ok(result.stderr.includes("--exclude requires a non-empty pattern"));
+  });
+
+  it("renders a presence matrix with per-folder cells", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "matrix-a", { "shared.txt": "x", "only-a.txt": "a" });
+      const b = await makeTree(parent, "matrix-b", { "shared.txt": "y", "only-b.txt": "b" });
+      const c = await makeTree(parent, "matrix-c", { "shared.txt": "x" });
+
+      const result = await runDiffold([a, b, c, "--matrix"]);
+      const output = plain(result.stdout);
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.ok(output.includes("=== Presence Matrix (3 valid folders) ==="));
+      assert.ok(output.includes("File"));
+      assert.ok(output.includes("F1"));
+      assert.ok(output.includes("F3"));
+      // shared.txt is present everywhere, but folder 2 holds the odd variant.
+      const sharedRow = output.split("\n").find((line) => line.includes("shared.txt"));
+      assert.ok(sharedRow, "shared.txt row missing");
+      assert.ok(sharedRow!.includes("Y"));
+      assert.ok(sharedRow!.includes("M"));
+      assert.ok(output.includes("only-a.txt"));
+      assert.ok(output.includes("only-b.txt"));
+      assert.ok(output.includes("Legend:"));
+      // The matrix replaces the per-folder list sections entirely.
+      assert.ok(!output.includes("Unique files:"));
+      assert.ok(!output.includes("Missing files:"));
+    });
+  });
+
+  it("marks a folder as modified only when it is the lone variant", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "matrix-group-a", { "shared.txt": "a" });
+      const b = await makeTree(parent, "matrix-group-b", { "shared.txt": "b" });
+      const c = await makeTree(parent, "matrix-group-c", { "shared.txt": "a" });
+
+      const result = await runDiffold([a, b, c, "--matrix"]);
+      const output = plain(result.stdout);
+      const row = output.split("\n").find((line) => line.includes("shared.txt"));
+
+      // Folders 1 and 3 agree, so only folder 2 is flagged.
+      const cells = row!.slice(row!.indexOf("shared.txt") + "shared.txt".length);
+      assert.strictEqual((cells.match(/M/g) ?? []).length, 1);
+    });
+  });
+
+  it("truncates matrix rows and honors --verbose", async () => {
+    await withTempRoot(async (parent) => {
+      const layout: Record<string, string> = {};
+      for (let index = 0; index < 30; index++) {
+        layout[`entry-${String(index).padStart(2, "0")}.txt`] = "content";
+      }
+      const a = await makeTree(parent, "matrix-trunc-a", layout);
+      // Every row must be notable, otherwise the identical-row hiding added in
+      // this release would drop all 30 rows and there would be nothing to truncate.
+      const differing = Object.fromEntries(
+        Object.keys(layout).map((name) => [name, "different"]),
+      );
+      const b = await makeTree(parent, "matrix-trunc-b", differing);
+
+      const truncated = plain((await runDiffold([a, b, "--matrix"])).stdout);
+      const verbose = plain((await runDiffold([a, b, "--matrix", "--verbose"])).stdout);
+
+      assert.ok(truncated.includes("... and 10 more (use --verbose to show all)"));
+      assert.ok(!truncated.includes("entry-25.txt"));
+      assert.ok(verbose.includes("entry-29.txt"));
+      assert.ok(!verbose.includes("use --verbose to show all"));
+    });
+  });
+
+  it("suppresses the matrix under --quiet", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "matrix-quiet-a", { "shared.txt": "x" });
+      const b = await makeTree(parent, "matrix-quiet-b", { "shared.txt": "y" });
+
+      const result = await runDiffold([a, b, "--matrix", "--quiet"]);
+      const output = plain(result.stdout);
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.ok(!output.includes("Presence Matrix"));
+      assert.ok(!output.includes("Legend:"));
+      assert.ok(output.includes("Content: 0 identical, 1 changed"));
+    });
   });
 
   it("expands ~ and reports the expanded path for a missing directory", async () => {
     const missing = "diffold-missing-dir-xyz";
     const result = await runDiffold([`~/${missing}`, "~/diffold-missing-dir-abc"]);
 
-    assert.strictEqual(result.exitCode, 1);
+    assert.strictEqual(result.exitCode, 2);
     assert.strictEqual(result.stdout, "");
     const expanded = path.resolve(os.homedir(), missing);
     assert.ok(
@@ -549,7 +812,7 @@ describe("diffold CLI", () => {
   it("rejects a file passed as a folder argument", async () => {
     const result = await runDiffold(["index.ts", FIXTURE_DIR2]);
 
-    assert.strictEqual(result.exitCode, 1);
+    assert.strictEqual(result.exitCode, 2);
     assert.strictEqual(result.stdout, "");
     assert.ok(result.stderr.includes("is not a directory"));
     assert.ok(result.stderr.includes("Need at least 2 valid directories"));
@@ -558,7 +821,7 @@ describe("diffold CLI", () => {
   it("rejects invalid argument counts", async () => {
     const result = await runDiffold([]);
 
-    assert.strictEqual(result.exitCode, 1);
+    assert.strictEqual(result.exitCode, 2);
     assert.strictEqual(result.stdout, "");
     assert.ok(result.stderr.includes("Usage:"));
     assert.ok(result.stderr.includes("diffold <dir1>"));
@@ -575,7 +838,7 @@ describe("diffold CLI", () => {
       FIXTURE_DIR2,
     ]);
 
-    assert.strictEqual(result.exitCode, 1);
+    assert.strictEqual(result.exitCode, 2);
     assert.strictEqual(result.stdout, "");
     assert.ok(result.stderr.includes("Usage:"));
     assert.ok(result.stderr.includes("(2-5 directories)"));
@@ -584,7 +847,7 @@ describe("diffold CLI", () => {
   it("rejects missing directories", async () => {
     const result = await runDiffold([FIXTURE_DIR1, "does-not-exist"]);
 
-    assert.strictEqual(result.exitCode, 1);
+    assert.strictEqual(result.exitCode, 2);
     assert.strictEqual(result.stdout, "");
     assert.ok(result.stderr.includes("Directory does not exist"));
     assert.ok(result.stderr.includes("Need at least 2 valid directories"));
@@ -596,7 +859,7 @@ describe("diffold CLI", () => {
       "Z:diffold-missing-dir-abc",
     ]);
 
-    assert.strictEqual(result.exitCode, 1);
+    assert.strictEqual(result.exitCode, 2);
     assert.strictEqual(result.stdout, "");
     assert.ok(result.stderr.includes("Directory does not exist"));
     assert.ok(result.stderr.includes("HINT:"));
@@ -611,7 +874,7 @@ describe("diffold CLI", () => {
         DIFFOLD_MAX_DEPTH: "2",
       });
 
-      assert.strictEqual(result.exitCode, 1);
+      assert.strictEqual(result.exitCode, 2);
       assert.strictEqual(result.stdout, "");
       assert.ok(result.stderr.includes("DIFFOLD_MAX_DEPTH"));
     });
@@ -625,7 +888,7 @@ describe("diffold CLI", () => {
         DIFFOLD_MAX_FILES: "1",
       });
 
-      assert.strictEqual(result.exitCode, 1);
+      assert.strictEqual(result.exitCode, 2);
       assert.strictEqual(result.stdout, "");
       assert.ok(result.stderr.includes("DIFFOLD_MAX_FILES"));
     });
@@ -635,7 +898,7 @@ describe("diffold CLI", () => {
     for (const bad of ["", "   "]) {
       const result = await runDiffold([bad, FIXTURE_DIR2]);
 
-      assert.strictEqual(result.exitCode, 1);
+      assert.strictEqual(result.exitCode, 2);
       assert.strictEqual(result.stdout, "");
       assert.ok(result.stderr.includes("empty or whitespace-only"));
     }
@@ -644,7 +907,7 @@ describe("diffold CLI", () => {
   it("preserves significant leading and trailing spaces in directory names", async () => {
     await withTempRoot(async (parent) => {
       const spaced = await makeTree(parent, " spaced ", { "file.txt": "x" });
-      const result = await runDiffold([spaced, FIXTURE_DIR1]);
+      const result = await runDiffold([spaced, FIXTURE_DIR1, "--list"]);
 
       assert.strictEqual(result.exitCode, 0);
       assert.ok(result.stdout.includes("Folder Diff Report (2 valid folders)"));
@@ -658,7 +921,7 @@ describe("diffold CLI", () => {
       FIXTURE_DIR2,
     ]);
 
-    assert.strictEqual(result.exitCode, 1);
+    assert.strictEqual(result.exitCode, 2);
     assert.strictEqual(result.stdout, "");
     // The old bug concatenated the literal name onto the home directory, e.g.
     // `<home>nosuchuserxyz`. Assert on that exact corruption instead of on the
@@ -678,7 +941,7 @@ describe("diffold CLI", () => {
       FIXTURE_DIR2,
     ]);
 
-    assert.strictEqual(result.exitCode, 1);
+    assert.strictEqual(result.exitCode, 2);
     assert.strictEqual(result.stdout, "");
     assert.ok(result.stderr.includes("Directory does not exist"));
     assert.ok(result.stderr.includes("all 3 requested folders must be valid"));
@@ -703,7 +966,7 @@ describe("diffold CLI", () => {
         "only-d.txt": "d",
       });
 
-      const result = await runDiffold([a, b, c, d]);
+      const result = await runDiffold([a, b, c, d, "--list"]);
       const output = plain(result.stdout);
 
       assert.strictEqual(result.exitCode, 0);
@@ -728,7 +991,7 @@ describe("diffold CLI", () => {
         );
       }
 
-      const result = await runDiffold(trees);
+      const result = await runDiffold([...trees, "--list"]);
       const output = plain(result.stdout);
 
       assert.strictEqual(result.exitCode, 0);
@@ -753,7 +1016,7 @@ describe("diffold CLI", () => {
         DIFFOLD_MAX_FILES: "2",
       });
 
-      assert.strictEqual(result.exitCode, 1);
+      assert.strictEqual(result.exitCode, 2);
       assert.strictEqual(result.stdout, "");
       assert.ok(result.stderr.includes("DIFFOLD_MAX_FILES"));
     });
@@ -783,7 +1046,7 @@ describe("diffold CLI", () => {
 
         const result = await runDiffold([locked, other]);
 
-        assert.strictEqual(result.exitCode, 1);
+        assert.strictEqual(result.exitCode, 2);
         assert.ok(result.stderr.includes("[skip]"));
         assert.ok(result.stderr.includes("Comparison incomplete"));
         assert.ok(plain(result.stdout).includes("[1 directory skipped]"));
@@ -797,7 +1060,7 @@ describe("diffold CLI", () => {
     const sneaky = path.join(root, "\u001b[31mno-such-dir\u001b[0m");
     const result = await runDiffold([sneaky, FIXTURE_DIR2]);
 
-    assert.strictEqual(result.exitCode, 1);
+    assert.strictEqual(result.exitCode, 2);
     assert.strictEqual(result.stdout, "");
     assert.ok(result.stderr.includes("no-such-dir"));
     assert.ok(

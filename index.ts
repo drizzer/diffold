@@ -43,6 +43,13 @@ function sanitizeForDisplay(value: string): string {
 
 // Usage always shows the published binary name, regardless of the runtime
 // the source was launched with; the README documents source execution.
+// Exit codes: 0 = success, 1 = differences found (only with --fail-on-diff),
+// 2 = usage error or fatal failure. The difference code is opt-in so existing
+// scripts that only check for a non-error exit keep working.
+const EXIT_SUCCESS = 0;
+const EXIT_DIFFERENCES = 1;
+const EXIT_FATAL = 2;
+
 const RUNNER = "diffold";
 
 const rawArgs = process.argv.slice(2);
@@ -52,6 +59,16 @@ let compareContent = true;
 let jsonOutput = false;
 let verbose = false;
 let quiet = false;
+let fileOutput: string | null = null;
+let fileOutputRequested = false;
+let forceOverwrite = false;
+let failOnDiff = false;
+// The matrix is the default view; --list opts back into per-folder unique/missing
+// lists, and -m / --matrix is kept as an explicit alias so scripts and docs can
+// name the view without depending on the default.
+let matrixView = true;
+let matrixViewRequested = false;
+let listViewRequested = false;
 
 for (let i = 0; i < rawArgs.length; i++) {
   const arg = rawArgs[i];
@@ -71,11 +88,54 @@ for (let i = 0; i < rawArgs.length; i++) {
     quiet = true;
     continue;
   }
+  if (arg === "-m" || arg === "--matrix") {
+    matrixView = true;
+    matrixViewRequested = true;
+    continue;
+  }
+  if (arg === "-l" || arg === "--list") {
+    matrixView = false;
+    listViewRequested = true;
+    continue;
+  }
+  if (arg === "--fail-on-diff") {
+    failOnDiff = true;
+    continue;
+  }
+  if (arg === "--force") {
+    forceOverwrite = true;
+    continue;
+  }
+  if (arg === "-f" || arg === "--file" || arg === "--output") {
+    fileOutputRequested = true;
+    // -f is usable with no value, so only consume the next token when doing so
+    // still leaves at least two directory arguments. This keeps `diffold a -f b`
+    // meaning "compare a and b, write the default file" instead of eating `b`.
+    const candidate = rawArgs[i + 1];
+    if (candidate !== undefined && !candidate.startsWith("-")) {
+      const remaining = rawArgs.slice(i + 2).filter((token) => !token.startsWith("-")).length;
+      if (rawDirs.length + remaining >= 2) {
+        fileOutput = candidate;
+        i++;
+      }
+    }
+    continue;
+  }
+  if (arg.startsWith("--file=") || arg.startsWith("--output=")) {
+    const separator = arg.indexOf("=");
+    fileOutputRequested = true;
+    fileOutput = arg.slice(separator + 1);
+    if (fileOutput.trim() === "") {
+      console.error(`${RED}ERROR: ${arg.slice(0, separator)} requires a non-empty path${RESET}`);
+      process.exit(EXIT_FATAL);
+    }
+    continue;
+  }
   if (arg === "-e" || arg === "--exclude") {
     const pattern = rawArgs[i + 1];
     if (pattern === undefined || pattern.trim() === "") {
       console.error(`${RED}ERROR: ${arg} requires a non-empty pattern${RESET}`);
-      process.exit(1);
+      process.exit(EXIT_FATAL);
     }
     excludePatterns.push(pattern);
     i++;
@@ -85,21 +145,26 @@ for (let i = 0; i < rawArgs.length; i++) {
     const pattern = arg.slice("--exclude=".length);
     if (pattern.trim() === "") {
       console.error(`${RED}ERROR: --exclude requires a non-empty pattern${RESET}`);
-      process.exit(1);
+      process.exit(EXIT_FATAL);
     }
     excludePatterns.push(pattern);
     continue;
   }
   if (arg.startsWith("-") && arg !== "-") {
     console.error(`${RED}ERROR: Unknown option: ${sanitizeForDisplay(arg)}${RESET}`);
-    process.exit(1);
+    process.exit(EXIT_FATAL);
   }
   rawDirs.push(arg);
 }
 
 if (verbose && quiet) {
   console.error(`${RED}ERROR: --verbose and --quiet cannot be combined${RESET}`);
-  process.exit(1);
+  process.exit(EXIT_FATAL);
+}
+
+if (listViewRequested && matrixViewRequested) {
+  console.error(`${RED}ERROR: --list and --matrix cannot be combined${RESET}`);
+  process.exit(EXIT_FATAL);
 }
 
 if (rawDirs.length < 2 || rawDirs.length > 5) {
@@ -112,8 +177,13 @@ if (rawDirs.length < 2 || rawDirs.length > 5) {
   console.error(`${RED}         --json            Print a machine-readable report to stdout${RESET}`);
   console.error(`${RED}         -v, --verbose     Print every entry instead of truncating long lists${RESET}`);
   console.error(`${RED}         -q, --quiet       Print only summary counts${RESET}`);
+  console.error(`${RED}         -f [path]         Write the report to a file (default: diffold-report.txt|.json)${RESET}`);
+  console.error(`${RED}         --force           Allow -f to overwrite an existing file${RESET}`);
+  console.error(`${RED}         --fail-on-diff    Exit 1 when differences are found (CI gate)${RESET}`);
+  console.error(`${RED}         --matrix          Per-file presence matrix (default view)${RESET}`);
+  console.error(`${RED}         -l, --list        Per-folder unique/missing lists instead${RESET}`);
   console.error(`${RED}Options: -e, --exclude <glob>  Exclude matching files/directories (repeatable)${RESET}`);
-  process.exit(1);
+  process.exit(EXIT_FATAL);
 }
 
 for (let i = 0; i < rawDirs.length; i++) {
@@ -121,7 +191,7 @@ for (let i = 0; i < rawDirs.length; i++) {
     console.error(
       `${RED}ERROR: Directory argument ${i + 1} is empty or whitespace-only${RESET}`,
     );
-    process.exit(1);
+    process.exit(EXIT_FATAL);
   }
 }
 
@@ -472,16 +542,119 @@ function printList(
   if (sorted.length === 0) return;
 
   const shown = verbose ? sorted : sorted.slice(0, DEFAULT_LIST_LIMIT);
-  console.log(`  ${heading}`);
+  report(`  ${heading}`);
   for (const entry of shown) {
-    console.log(`    ${render(entry)}`);
+    report(`    ${render(entry)}`);
   }
   if (shown.length < sorted.length) {
     const hidden = sorted.length - shown.length;
-    console.log(
+    report(
       `    ${YELLOW}... and ${hidden} more (use --verbose to show all)${RESET}`,
     );
   }
+}
+
+type MatrixCell = "present" | "absent" | "modified";
+
+interface MatrixRow {
+  path: string;
+  cells: MatrixCell[];
+}
+
+function buildMatrixRows(
+  fileSets: Set<string>[],
+  contentDifferences: ContentDifference[],
+): MatrixRow[] {
+  const allPaths = new Set<string>();
+  for (const files of fileSets) {
+    for (const file of files) allPaths.add(file);
+  }
+
+  // A file is "modified" in every folder that holds it when its content is not
+  // identical across all folders, so the cell shows the conflict at a glance.
+  const modifiedPaths = new Set(contentDifferences.map((item) => item.path));
+
+  // A folder holding a variant that no other folder shares is the odd one out,
+  // so it is the cell worth flagging. Every other holder is plain present.
+  return [...allPaths].sort().map((filePath) => ({
+    path: filePath,
+    cells: fileSets.map((files, index) => {
+      if (!files.has(filePath)) return "absent";
+      if (!compareContent || !modifiedPaths.has(filePath)) return "present";
+      const difference = contentDifferences.find((item) => item.path === filePath);
+      if (!difference) return "present";
+      const oddGroup = difference.groups.find((group) => group.length === 1);
+      return oddGroup?.[0] === index ? "modified" : "present";
+    }),
+  }));
+}
+
+function printMatrix(
+  rows: MatrixRow[],
+  commonAll: Set<string>,
+  contentDifferences: ContentDifference[],
+  identicalCount: number,
+): void {
+  report(
+    `${YELLOW}\n=== Presence Matrix (${validFiles.length} valid folders) ===\n${RESET}`,
+  );
+
+  // Rows where every folder agrees are noise in a diff: the user is looking for
+  // what differs. Hide them by default and report the count; --verbose reveals all.
+  const notable = rows.filter((row) => row.cells.some((cell) => cell !== "present"));
+  const visible = verbose ? rows : notable;
+  const hiddenIdentical = rows.length - visible.length;
+  const shown = verbose ? visible : visible.slice(0, DEFAULT_LIST_LIMIT);
+  // Math.max over an empty array is -Infinity, so the 4 floor must come first.
+  const labelWidth = shown.length === 0
+    ? 4
+    : Math.max(4, ...shown.map((row) => row.path.length));
+  const header = `File${" ".repeat(Math.max(1, labelWidth - 4))}  ` +
+    validFiles.map((_, index) => `F${index + 1} `).join("");
+  report(`  ${header}`);
+  report(`  ${"-".repeat(labelWidth + 2 + validFiles.length * 3)}`);
+
+  for (const row of shown) {
+    const cells = row.cells.map((cell) => {
+      if (cell === "present") return `${GREEN}Y  `;
+      if (cell === "modified") return `${YELLOW}M  `;
+      return `${RED}-  `;
+    }).join("");
+    report(`  ${sanitizeForDisplay(row.path).padEnd(labelWidth)}  ${cells}`);
+  }
+  if (shown.length < visible.length) {
+    const hidden = visible.length - shown.length;
+    report(
+      `  ${YELLOW}... and ${hidden} more (use --verbose to show all)${RESET}`,
+    );
+  }
+
+  report("");
+  report(
+    `Common to all ${validFiles.length} folders: ${GREEN}${commonAll.size}${RESET} files`,
+  );
+  if (compareContent) {
+    report(
+      `Content: ${GREEN}${identicalCount} identical${RESET} | ${contentDifferences.length > 0 ? RED : ""}${contentDifferences.length} changed${RESET}`,
+    );
+  } else {
+    report("Content: comparison disabled (-c)");
+  }
+  if (hiddenIdentical > 0) {
+    report(
+      `${YELLOW}${hiddenIdentical} identical row${hiddenIdentical === 1 ? "" : "s"} hidden (use --verbose to show all)${RESET}`,
+    );
+  }
+  const matrixSkipped = skippedDirsByFolder.reduce(
+    (total, skipped) => total + skipped.length,
+    0,
+  );
+  if (matrixSkipped > 0) {
+    report(
+      `${YELLOW}[${matrixSkipped} director${matrixSkipped === 1 ? "y" : "ies"} skipped]${RESET}`,
+    );
+  }
+  report(`${YELLOW}Legend: Y present  - absent  M modified (differs from every other folder)${RESET}`);
 }
 
 function printHumanReport(
@@ -495,30 +668,49 @@ function printHumanReport(
 
   if (quiet) {
     for (let i = 0; i < validFiles.length; i++) {
-      console.log(
+      report(
         `Folder ${i + 1}: ${validFiles[i].size} files, ${differences.unique[i].size} unique, ${differences.missing[i].size} missing`,
       );
     }
-    console.log(`Common to all ${validFiles.length} folders: ${commonAll.size} files`);
-    console.log(
+    report(`Common to all ${validFiles.length} folders: ${commonAll.size} files`);
+    report(
       compareContent
         ? `Content: ${identicalCount} identical, ${contentDifferences.length} changed`
         : "Content: comparison disabled (-c)",
     );
-    console.log(
+    report(
       `Totals: ${totalUnique} unique entries, ${totalMissing} missing entries`,
+    );
+    const quietSkipped = skippedDirsByFolder.reduce(
+      (total, skipped) => total + skipped.length,
+      0,
+    );
+    if (quietSkipped > 0) {
+      report(
+        `${YELLOW}[${quietSkipped} director${quietSkipped === 1 ? "y" : "ies"} skipped]${RESET}`,
+      );
+    }
+    return;
+  }
+
+  if (matrixView) {
+    printMatrix(
+      buildMatrixRows(validFiles, contentDifferences),
+      commonAll,
+      contentDifferences,
+      identicalCount,
     );
     return;
   }
 
-  console.log(
+  report(
     `${YELLOW}\n=== Folder Diff Report (${validFiles.length} valid folders) ===\n${RESET}`,
   );
 
   for (let i = 0; i < validFiles.length; i++) {
     const unique = differences.unique[i];
     const missing = differences.missing[i];
-    console.log(
+    report(
       `Folder ${i + 1}: ${validFiles[i].size} total files (${BLUE}${sanitizeForDisplay(validDirs[i])}${RESET}):`,
     );
     const uniqueColor = unique.size > 0 ? RED : "";
@@ -527,49 +719,125 @@ function printHumanReport(
     const skippedNote = skippedCount > 0
       ? ` [${skippedCount} director${skippedCount === 1 ? "y" : "ies"} skipped]`
       : "";
-    console.log(
+    report(
       `  Unique: ${uniqueColor}${unique.size}${RESET} | Missing: ${missingColor}${missing.size}${RESET}${skippedNote}`,
     );
     printList("Unique files:", unique, (file) => sanitizeForDisplay(file));
     printList("Missing files:", missing, (file) => sanitizeForDisplay(file));
-    console.log("");
+    report("");
   }
 
-  console.log(
+  report(
     `Common to all ${validFiles.length} folders: ${GREEN}${commonAll.size}${RESET} files`,
   );
   if (compareContent) {
-    console.log(
+    report(
       `Content: ${GREEN}${identicalCount} identical${RESET} | ${contentDifferences.length > 0 ? RED : ""}${contentDifferences.length} changed${RESET}`,
     );
     if (contentDifferences.length > 0) {
       const shown = verbose
         ? contentDifferences
         : contentDifferences.slice(0, DEFAULT_LIST_LIMIT);
-      console.log("  Changed files:");
+      report("  Changed files:");
       for (const difference of shown) {
         const groups = difference.groups
           .map((group) => `Folders ${group.map((index) => index + 1).join(", ")}`)
           .join(" != ");
-        console.log(`    ${sanitizeForDisplay(difference.path)}: ${groups}`);
+        report(`    ${sanitizeForDisplay(difference.path)}: ${groups}`);
       }
       if (shown.length < contentDifferences.length) {
         const hidden = contentDifferences.length - shown.length;
-        console.log(
+        report(
           `    ${YELLOW}... and ${hidden} more (use --verbose to show all)${RESET}`,
         );
       }
     }
   } else {
-    console.log("Content: comparison disabled (-c)");
+    report("Content: comparison disabled (-c)");
   }
 
-  console.log(
+  report(
     `${YELLOW}\nSupports ~ (home) for linux/windows and both forward and back slashes: / \\ as separators.${RESET}`,
   );
-  console.log(
+  report(
     `${YELLOW}Supports Windows drives (f:/   f:\\   f://   f:\\\\  and  f:)${RESET}`,
   );
+}
+
+// Report rendering writes through a sink so -f can capture it instead of
+// printing to stdout. Diagnostics always stay on stderr.
+let reportSink: (line: string) => void = (line) => console.log(line);
+
+function report(line: string): void {
+  reportSink(line);
+}
+
+function resetReportSink(): void {
+  reportSink = (line) => console.log(line);
+}
+
+function resolveReportPath(requested: string | null): string {
+  const defaultName = jsonOutput ? "diffold-report.json" : "diffold-report.txt";
+  const withExtension = requested === null
+    ? defaultName
+    : path.extname(requested) === ""
+      ? `${requested}.${jsonOutput ? "json" : "txt"}`
+      : requested;
+  return path.resolve(withExtension);
+}
+
+async function writeReportFile(
+  destination: string,
+  content: () => void,
+): Promise<void> {
+  if (!forceOverwrite) {
+    try {
+      await fs.stat(destination);
+      console.error(
+        `${RED}ERROR: Report file already exists: ${sanitizeForDisplay(destination)}${RESET}`,
+      );
+      console.error(`${RED}HINT: Pass --force to overwrite it${RESET}`);
+      process.exit(EXIT_FATAL);
+    } catch (err: unknown) {
+      const isMissing =
+        typeof err === "object" && err !== null && "code" in err &&
+        err.code === "ENOENT";
+      if (!isMissing) throw err;
+    }
+  }
+
+  const parent = path.dirname(destination);
+  try {
+    await fs.mkdir(parent, { recursive: true });
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? ` (${sanitizeForDisplay(err.message)})` : "";
+    console.error(
+      `${RED}ERROR: Cannot create report directory${detail}: ${sanitizeForDisplay(parent)}${RESET}`,
+    );
+    process.exit(EXIT_FATAL);
+  }
+
+  const captured: string[] = [];
+  reportSink = (line) => captured.push(line);
+  try {
+    content();
+  } finally {
+    resetReportSink();
+  }
+
+  try {
+    await fs.writeFile(destination, `${captured.join("\n")}\n`, "utf8");
+  } catch (err: unknown) {
+    const detail = err instanceof Error ? ` (${sanitizeForDisplay(err.message)})` : "";
+    console.error(
+      `${RED}ERROR: Cannot write report file${detail}: ${sanitizeForDisplay(destination)}${RESET}`,
+    );
+    process.exit(EXIT_FATAL);
+  }
+
+  // The confirmation goes to stderr so stdout stays empty and a piped stdout is
+  // never contaminated, even when --json was requested.
+  console.error(`${GREEN}Report saved to ${sanitizeForDisplay(destination)}${RESET}`);
 }
 
 async function main() {
@@ -591,14 +859,14 @@ async function main() {
 
   if (validFiles.length < 2) {
     console.error(`${RED}ERROR: Need at least 2 valid directories${RESET}`);
-    process.exit(1);
+    process.exit(EXIT_FATAL);
   }
 
   if (failedArguments > 0) {
     console.error(
       `${RED}ERROR: ${failedArguments} director${failedArguments === 1 ? "y" : "ies"} could not be used; all ${dirs.length} requested folders must be valid${RESET}`,
     );
-    process.exit(1);
+    process.exit(EXIT_FATAL);
   }
 
   const differences = getFolderDifferences(validFiles);
@@ -613,43 +881,67 @@ async function main() {
     0,
   );
 
-  if (jsonOutput) {
-    const report: JsonReport = {
-      schemaVersion: 1,
-      contentComparison: compareContent ? "sha256" : "disabled",
-      folders: validDirs.map((folder, index) => ({
-        path: folder,
-        totalFiles: validFiles[index].size,
-        skippedDirectories: [...(skippedDirsByFolder[index] ?? [])].sort(),
-      })),
-      unique: differences.unique.map((files) => [...files].sort()),
-      missing: differences.missing.map((files) => [...files].sort()),
-      common: [...commonAll].sort(),
-      identical: identicalPaths,
-      modified: contentDifferences,
-      incomplete: totalSkipped > 0,
-    };
-    console.log(JSON.stringify(report, null, 2));
+  const renderReport = (): void => {
+    if (jsonOutput) {
+      const jsonReport: JsonReport = {
+        schemaVersion: 1,
+        contentComparison: compareContent ? "sha256" : "disabled",
+        folders: validDirs.map((folder, index) => ({
+          path: folder,
+          totalFiles: validFiles[index].size,
+          skippedDirectories: [...(skippedDirsByFolder[index] ?? [])].sort(),
+        })),
+        unique: differences.unique.map((files) => [...files].sort()),
+        missing: differences.missing.map((files) => [...files].sort()),
+        common: [...commonAll].sort(),
+        identical: identicalPaths,
+        modified: contentDifferences,
+        incomplete: totalSkipped > 0,
+      };
+      report(JSON.stringify(jsonReport, null, 2));
+    } else {
+      printHumanReport(
+        differences,
+        commonAll,
+        contentDifferences,
+        identicalPaths.length,
+      );
+    }
+  };
+
+  if (fileOutputRequested) {
+    await writeReportFile(resolveReportPath(fileOutput), renderReport);
   } else {
-    printHumanReport(
-      differences,
-      commonAll,
-      contentDifferences,
-      identicalPaths.length,
-    );
+    renderReport();
   }
 
   if (totalSkipped > 0) {
     console.error(
       `${YELLOW}WARNING: Comparison incomplete — ${totalSkipped} director${totalSkipped === 1 ? "y was" : "ies were"} skipped due to read errors${RESET}`,
     );
-    process.exitCode = 1;
+    // An incomplete comparison is a failure, not a difference: never let it be
+    // reported as "1 = differences found".
+    process.exitCode = EXIT_FATAL;
+    return;
   }
+
+  if (failOnDiff) {
+    const hasDifferences =
+      differences.unique.some((files) => files.size > 0) ||
+      differences.missing.some((files) => files.size > 0) ||
+      contentDifferences.length > 0;
+    if (hasDifferences) {
+      process.exitCode = EXIT_DIFFERENCES;
+      return;
+    }
+  }
+
+  process.exitCode = EXIT_SUCCESS;
 }
 
 main().catch((err: unknown) => {
   console.error(
     `${RED}FATAL: ${err instanceof Error ? err.message : String(err)}${RESET}`,
   );
-  process.exit(1);
+  process.exit(EXIT_FATAL);
 });

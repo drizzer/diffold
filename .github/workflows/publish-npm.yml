@@ -51,7 +51,7 @@ jobs:
           set -eu
           echo "Requiring a green CI run for ${GITHUB_SHA}"
           for attempt in $(seq 1 60); do
-            state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&per_page=100" \
+            state="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/checks.yml/runs?head_sha=${GITHUB_SHA}&per_page=100" \
               --jq '(.workflow_runs | sort_by(.created_at) | last) as $latest | if (.workflow_runs | length) == 0 then "missing" elif $latest.status != "completed" then "pending" elif $latest.conclusion == "success" then "green" else "failed" end')"
             case "$state" in
               green)

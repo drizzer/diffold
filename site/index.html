@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="diffold compares 2–5 directories and shows which files are unique, missing, and changed across them. Zero runtime dependencies.">
+<title>diffold — compare directories, see what differs</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="diffold">
+<meta property="og:title" content="diffold — compare directories, see what differs">
+<meta property="og:description" content="diffold compares 2–5 directories and shows which files are unique, missing, and changed across them. Zero runtime dependencies.">
+<meta property="og:url" content="https://drizzer.github.io/diffold/">
+<meta property="og:image" content="https://drizzer.github.io/diffold/social-card.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="diffold — compare directories, see what differs">
+<meta name="twitter:description" content="diffold compares 2–5 directories and shows which files are unique, missing, and changed across them. Zero runtime dependencies.">
+<meta name="twitter:image" content="https://drizzer.github.io/diffold/social-card.png">
+</head>
+<body>
+<header class="site-header">
+  <nav class="nav wrap" aria-label="Primary">
+    <a class="brand" href="#top"><img class="brand-logo" src="favicon.svg" alt="" width="20" height="20"><span class="brand-mark" aria-hidden="true">$</span> diffold</a>
+    <div class="nav-links">
+      <a href="#try">Try it</a>
+      <a href="#features">Features</a>
+      <a href="#docs">Docs</a>
+    </div>
+    <button class="theme-toggle" id="themeToggle" type="button" aria-pressed="false" aria-label="Switch to light theme">Light</button>
+  </nav>
+</header>
+
+<main id="top">
+  <section class="hero wrap">
+    <h1>Compare directories.<br>See what differs.</h1>
+    <p class="lede">diffold compares 2–5 folders and reports which files are unique, missing, and changed — with content hashing on by default and a matrix view that makes the odd one out obvious.</p>
+    <div class="install-row">
+      <code class="install-cmd" id="installCmd">npx diffold dir1 dir2</code>
+      <button class="copy-btn" id="copyInstall" type="button">Copy</button>
+    </div>
+    <p class="install-note">No install needed · Bun and Node supported · Zero runtime dependencies</p>
+    <div class="hero-actions">
+      <a class="btn primary" href="#try">See it in action</a>
+      <a class="btn" href="https://github.com/drizzer/diffold">GitHub</a>
+      <a class="btn" href="https://www.npmjs.com/package/diffold">npm</a>
+    </div>
+    <div class="hero-proof">
+      <p><strong>2–5 folders per run · zero runtime dependencies</strong></p>
+      <p>A real 684-vs-584-file comparison renders in <strong>30 lines</strong> instead of 592.</p>
+    </div>
+  </section>
+
+  <section class="terminal-section wrap" id="try" aria-label="Live example">
+    <div class="terminal-tabs" role="tablist" aria-label="Output views">
+      <button type="button" role="tab" id="tab-matrix" aria-selected="true" aria-controls="view-matrix" data-view="matrix">Matrix</button>
+      <button type="button" role="tab" id="tab-list" aria-selected="false" aria-controls="view-list" data-view="list" tabindex="-1">Per-folder list</button>
+      <button type="button" role="tab" id="tab-json" aria-selected="false" aria-controls="view-json" data-view="json" tabindex="-1">JSON</button>
+    </div>
+    <div class="terminal" aria-label="Terminal showing a diffold output comparison for three folders">
+      <div class="terminal-bar" aria-hidden="true"><span></span><span></span><span></span><em>diffold</em></div>
+      <div class="terminal-body">
+        <div class="view" id="view-matrix" role="tabpanel" aria-labelledby="tab-matrix">
+        <p class="cmd"><span class="prompt">$ </span>diffold a b c</p>
+        <p class="report-title">=== Presence Matrix (3 valid folders) ===</p>
+        <div class="matrix-grid" aria-hidden="true">
+          <span class="mh">File</span><span class="mh">F1</span><span class="mh">F2</span><span class="mh">F3</span>
+          <span class="mf">only-a.txt</span><span class="y">Y</span><span class="n">-</span><span class="n">-</span>
+          <span class="mf">only-b.txt</span><span class="n">-</span><span class="y">Y</span><span class="n">-</span>
+          <span class="mf">shared.txt</span><span class="y">Y</span><span class="y">Y</span><span class="m">M</span>
+
+        </div>
+        <p>Common to all 3 folders: <span class="y">1</span> files</p>
+        <p>Content: <span class="y">0 identical</span> | <span class="r">1 changed</span></p>
+        <p class="legend">Legend: Y present&nbsp;&nbsp;- absent&nbsp;&nbsp;M modified (differs from every other folder)</p>
+        </div>
+        <div class="view" id="view-list" role="tabpanel" aria-labelledby="tab-list" hidden>
+          <p class="cmd"><span class="prompt">$ </span>diffold a b c --list</p>
+          <p class="report-title">=== Folder Diff Report (3 valid folders) ===</p>
+          <p><span class="blue">Folder 1:</span> 2 total files</p>
+          <p>&nbsp;&nbsp;Unique: <span class="y">1</span> &#183; Missing: <span class="n">1</span></p>
+          <p class="indent">only-a.txt</p>
+          <p class="indent">only-b.txt <span class="n">(missing)</span></p>
+          <p><span class="blue">Folder 2:</span> 2 total files</p>
+          <p>&nbsp;&nbsp;Unique: <span class="y">1</span> &#183; Missing: <span class="n">1</span></p>
+          <p class="indent">only-b.txt</p>
+          <p class="indent">only-a.txt <span class="n">(missing)</span></p>
+          <p><span class="blue">Folder 3:</span> 1 total file</p>
+          <p>&nbsp;&nbsp;Unique: <span class="y">0</span> &#183; Missing: <span class="n">2</span></p>
+          <p class="indent">only-a.txt <span class="n">(missing)</span></p>
+          <p class="indent">only-b.txt <span class="n">(missing)</span></p>
+          <p>Common to all 3 folders: <span class="y">1</span> file</p>
+          <p>Content: <span class="y">0 identical</span> | <span class="r">1 changed</span></p>
+        </div>
+        <div class="view" id="view-json" role="tabpanel" aria-labelledby="tab-json" hidden>
+          <p class="cmd"><span class="prompt">$ </span>diffold a b c --json</p>
+          <p class="report-title">typed, versioned report &#8212; feeds the next step</p>
+          <p>{</p>
+          <p class="indent">&#8195;"schemaVersion": <span class="m">1</span>,</p>
+          <p class="indent">&#8195;"contentComparison": <span class="m">"sha256"</span>,</p>
+                    <p class="indent">&#8195;"folders": { <span class="m">"a"</span>: <span class="y">2</span>, <span class="m">"b"</span>: <span class="y">2</span>, <span class="m">"c"</span>: <span class="y">1</span> },</p>
+                    <p class="indent">&#8195;"unique": { <span class="m">"only-a.txt"</span> | <span class="m">"only-b.txt"</span> | [] },</p>
+          <p class="indent">&#8195;"common": [<span class="m">"shared.txt"</span>],</p>
+          <p class="indent">&#8195;"modified": { <span class="m">"shared.txt"</span>: groups <span class="r">[[0,1],[2]]</span> },</p>
+          <p class="indent">&#8195;"incomplete": <span class="y">false</span></p>
+          <p>}</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap" id="features">
+    <h2>Why diffold</h2>
+    <div class="feature-lead">
+      <article><h3>Content-aware by default</h3><p>Files present everywhere are fingerprinted with streaming SHA-256 and split into identical vs changed. Pass <code>-c</code> for presence-only.</p></article>
+      <article><h3>Matrix first</h3><p>One row per file, one column per folder. <code>M</code> marks the folder holding a variant nobody else shares. Agreement rows hide unless <code>--verbose</code>.</p></article>
+    </div>
+    <ul class="feature-rest">
+      <li><strong>Readable at scale.</strong> Sections cap at 20 entries; a real 684-vs-584-file tree renders in 30 lines instead of 592.</li>
+      <li><strong>Machine-readable.</strong> <code>--json</code> prints a versioned report; <code>-f</code> writes either format to a file with stdout empty.</li>
+      <li><strong>CI gate.</strong> Exit <code>0</code> success, <code>1</code> differences with <code>--fail-on-diff</code>, <code>2</code> usage or fatal — incomplete runs always exit <code>2</code>.</li>
+      <li><strong>Safe traversal.</strong> Depth and file-count limits, symlink skipping, path containment, terminal-safe output. Zero runtime dependencies.</li>
+    </ul>
+  </section>
+
+  <section class="wrap" id="matrix">
+    <h2>One view for which folder is different?</h2>
+    <p>Comparing three or more trees with per-folder lists means holding every list in your head at once. The matrix puts every file on one row so the answer is positional: scan the row, find the column that disagrees.</p>
+    <div class="matrix-plus-ci">
+      <div class="matrix-col">
+        <div class="compare">
+      <div><h3>Matrix (default)</h3><pre><code>$ diffold dir1 dir2 dir3
+only-a.txt  Y  -  -
+only-b.txt  -  Y  -
+shared.txt  Y  Y  M</code></pre></div>
+      <div><h3>Per-folder list</h3><pre><code>$ diffold dir1 dir2 dir3 --list
+Folder 1: unique only-a.txt
+Folder 2: unique only-b.txt
+Folder 3: missing both
+Common: 1 file, 1 changed</code></pre></div>
+        </div>
+        <p class="fine">Prefer lists for two folders or per-tree audits: <code>--list</code> / <code>-l</code>. Explicit matrix alias: <code>--matrix</code> / <code>-m</code>.</p>
+      </div>
+      <div class="ci-col" id="ci">
+        <h2>Built for pipelines</h2>
+        <pre><code># Fail the job only when trees genuinely differ
+diffold build-a build-b --fail-on-diff</code></pre>
+        <ul class="ticks">
+          <li>Exit <code>0</code> clean, <code>1</code> differences (opt-in), <code>2</code> broken input</li>
+          <li><code>--json</code> hands a typed report to the next step</li>
+          <li><code>-f</code> saves evidence without touching stdout</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap" id="docs">
+    <h2>Docs</h2>
+    <div class="cards docs">
+      <article><h3>Options</h3><pre><code>-c, --no-content   paths only
+--json             machine-readable
+-e, --exclude      repeatable globs
+-v / -q            all rows / counts only
+-f [path]          write report to file</code></pre></article>
+      <article><h3>Install and run</h3><pre><code>npx diffold dir1 dir2
+bunx diffold dir1 dir2 dir3
+npm i -g diffold</code></pre>
+      <p>Requires Node.js 22+ or Bun 1.4+. Deno source runs are best-effort.</p></article>
+      <article><h3>Project</h3>
+        <p><a href="https://github.com/drizzer/diffold">GitHub repository</a> · <a href="https://www.npmjs.com/package/diffold">npm package</a> · <a href="https://github.com/drizzer/diffold/blob/main/LICENSE">MIT license</a></p>
+        <p>Bug reports are most useful with the exact arguments, folder layout, and expected result. Security issues go through <a href="https://github.com/drizzer/diffold/security/advisories/new">private advisories</a>.</p>
+      </article>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <p><strong>diffold</strong> &copy; 2026 DRiZZER · MIT</p>
+    <p><a href="https://github.com/sponsors/drizzer">Sponsor</a> · <a href="https://ko-fi.com/drizzer">Ko-fi</a> · <a href="https://buymeacoffee.com/drizzer">Buy Me a Coffee</a></p>
+  </div>
+</footer>
+
+<script src="site.js"></script>
+</body>
+</html>

@@ -12,7 +12,9 @@ Non-sensitive bugs can be filed as regular [GitHub issues](https://github.com/dr
 
 ## Security Posture
 
-- Read-only local CLI: no write/delete operations.
+- Read-only by default: comparison never writes or deletes. The only exception is
+  the explicit `-f` / `--file` / `--output` report-file option, which creates or
+  overwrites a single report file the caller named (overwrite requires `--force`).
 - No network access.
 - No runtime dependencies in the compiled CLI.
 - Uses Node-compatible built-in modules only.
@@ -22,3 +24,4 @@ Non-sensitive bugs can be filed as regular [GitHub issues](https://github.com/dr
 - Content comparison streams files through SHA-256 in fixed-size chunks; it never buffers a whole file or retains contents. Pass `-c` / `--no-content` for a presence-only run that never opens file contents.
 - JSON mode keeps stdout to a single JSON document; all diagnostics, `[skip]` lines, and warnings stay on stderr so piped output is safe to parse.
 - `--exclude` prunes excluded directories before descending and cannot widen traversal beyond the resolved-root containment guard.
+- Report files are written only where the caller asked: parent directories are created, an existing file is never overwritten without `--force`, and every printed path is sanitized.

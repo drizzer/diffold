@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-10-12
+
+New views, CI-friendly exit codes, and report files.
+
+### Changed
+
+- The default view has changed: 0.0.6 and earlier printed per-folder
+  unique/missing lists, 0.1.0 prints a presence matrix with one row per file and
+  one column per folder. `--list` / `-l` restores the old layout; `-m` /
+  `--matrix` is an explicit alias for the new default.
+- The presence matrix omits rows where every folder agrees — a file present in
+  all folders with identical content — because such rows carry no information.
+  The summary states how many rows were hidden, and `--verbose` prints every
+  row including the hidden ones.
+- Usage and fatal errors exit `2`; in 0.0.6 and earlier every error exited `1`.
+  Exit `1` is reserved for "differences found" and is only returned with
+  `--fail-on-diff`. Scripts that treat any non-zero exit as a generic failure
+  keep working; scripts that asserted exactly `1` for errors must be updated.
+- Passing `--list` and `--matrix` together is a usage error that exits `2`, the
+  same rule already applied to `--verbose` combined with `--quiet`.
+
+### Added
+
+- Meaningful exit codes: `0` success, `1` differences, `2` usage/fatal.
+- `--fail-on-diff` opt-in gate that turns a comparison into a CI check. An incomplete
+  comparison always exits `2`, never `1`, so a partial report is never read as a
+  difference result.
+- `--matrix` presence table: one row per file, one column per folder, with
+  `Y` present / `-` absent / `M` modified. The `M` cell marks the folder holding a
+  content variant no other folder shares, so the odd one out is visible at a glance.
+- Write reports to a file with `-f` / `--file` / `--output`, inferring `.txt` or `.json`,
+  creating parent directories, and refusing to overwrite without `--force`. stdout stays
+  completely empty so a redirected report is never contaminated.
+- Project branding: logo (`assets/logo.svg`), site favicon, and PNG renders
+  (`assets/icon-512.png`, social card). The README header and the landing site
+  both carry the logo.
+- GitHub Pages landing site in `site/`, deployed automatically on every push
+  to `main` by `deploy-pages.yml` (one-time "GitHub Actions" source setting).
+
 ## [0.0.6] — 2026-10-01
 
 ### Added
@@ -35,7 +74,7 @@ Content comparison ships as the default mode.
 
 ### Changed
 
-- **Breaking:** content comparison is now enabled by default. `diffold <dir1> <dir2> [...]` now compares file contents and reports files common to every folder as identical or changed, instead of reporting presence only. Pass `-c` / `--no-content` to restore the previous presence-only behavior.
+- Content comparison is now enabled by default: `diffold <dir1> <dir2> [...]` compares file contents and reports files common to every folder as identical or changed, instead of reporting presence only. Pass `-c` / `--no-content` for presence-only behavior.
 
 ### Added
 
