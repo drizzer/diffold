@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { spawn } from "node:child_process";
-import { chmod, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,11 +13,6 @@ const FIXTURE_DIR1 = "tests/test-folders/test_dir1";
 const FIXTURE_DIR2 = "tests/test-folders/test_dir2";
 
 function getRunner(): [string, string[]] {
-  if (typeof Deno !== "undefined") {
-    // --allow-sys is needed for os.homedir() used by ~ expansion.
-    // --allow-write is needed for -f report files.
-    return ["deno", ["run", "--allow-read", "--allow-write", "--allow-env", "--allow-sys", cli]];
-  }
   if ("Bun" in globalThis) {
     return [process.execPath, ["run", cli]];
   }
@@ -44,7 +39,9 @@ async function runDiffold(
   const proc = spawn(cmd, [...baseArgs, ...args], {
     cwd: root,
     stdio: ["inherit", "pipe", "pipe"],
-    env: { ...process.env, ...env },
+    // Pin the color environment: the suite must not depend on the developer's
+    // shell, and a FORCE_COLOR in CI would otherwise change every captured byte.
+    env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "", ...env },
   });
 
   const stdoutChunks: Buffer[] = [];
@@ -826,6 +823,8 @@ describe("diffold CLI", () => {
     assert.ok(result.stderr.includes("Usage:"));
     assert.ok(result.stderr.includes("diffold <dir1>"));
     assert.ok(!result.stderr.includes("index.ts <dir1>"));
+    // The error points at the full reference instead of dumping every option.
+    assert.ok(result.stderr.includes("--help"));
   });
 
   it("rejects more than five folders", async () => {
@@ -1089,6 +1088,138 @@ describe("diffold CLI", () => {
         "an ANSI sequence from a file name must not reach stdout",
       );
     });
+  });
+
+  it("prints the version from package.json with --version and -V", async () => {
+    const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8")) as {
+      version: string;
+    };
+
+    for (const flag of ["--version", "-V"]) {
+      const result = await runDiffold([flag]);
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.strictEqual(result.stderr, "");
+      // The version is read from the manifest, so it can never drift from it.
+      assert.strictEqual(result.stdout.trim(), `diffold ${manifest.version}`);
+    }
+  });
+
+  it("prints plain self-documenting help with --help and -h", async () => {
+    for (const flag of ["--help", "-h"]) {
+      const result = await runDiffold([flag]);
+      const output = plain(result.stdout);
+
+      assert.strictEqual(result.exitCode, 0);
+      assert.strictEqual(result.stderr, "");
+      // Help needs no directory arguments and stays pipe-friendly (no ANSI).
+      assert.strictEqual(result.stdout, output);
+      assert.ok(output.startsWith("diffold "));
+      assert.ok(output.includes("Usage:"));
+      assert.ok(output.includes("-c, --no-content"));
+      assert.ok(output.includes("-e, --exclude <glob>"));
+      assert.ok(output.includes("-V, --version"));
+      assert.ok(output.includes("Exit codes:"));
+      assert.ok(output.includes("DIFFOLD_MAX_DEPTH"));
+    }
+  });
+
+  it("keeps color out of redirected output by default", async () => {
+    const report = await runDiffold([FIXTURE_DIR1, FIXTURE_DIR2]);
+
+    assert.strictEqual(report.exitCode, 0);
+    assert.ok(!report.stdout.includes("\u001b["), "piped stdout must stay plain");
+    assert.ok(!report.stderr.includes("\u001b["), "piped stderr must stay plain");
+
+    const usage = await runDiffold([]);
+    assert.strictEqual(usage.exitCode, 2);
+    assert.ok(!usage.stderr.includes("\u001b["), "usage errors must honor the same policy");
+  });
+
+  it("honors FORCE_COLOR, keeps report files plain, and lets --no-color win", async () => {
+    const forced = await runDiffold([FIXTURE_DIR1, FIXTURE_DIR2], { FORCE_COLOR: "1" });
+    assert.strictEqual(forced.exitCode, 0);
+    assert.ok(forced.stdout.includes("\u001b["), "FORCE_COLOR must opt back in");
+
+    await withTempRoot(async (parent) => {
+      const target = path.join(parent, "report.txt");
+      const written = await runDiffold(
+        [FIXTURE_DIR1, FIXTURE_DIR2, "-f", target],
+        { FORCE_COLOR: "1" },
+      );
+
+      assert.strictEqual(written.exitCode, 0);
+      assert.strictEqual(written.stdout, "");
+      const file = await readFile(target, "utf8");
+      assert.ok(file.includes("Presence Matrix"));
+      // A report file must never inherit the terminal's escapes.
+      assert.ok(!file.includes("\u001b["), "report files must be plain text");
+    });
+
+    const overridden = await runDiffold(
+      [FIXTURE_DIR1, FIXTURE_DIR2, "--no-color"],
+      { FORCE_COLOR: "1" },
+    );
+    assert.strictEqual(overridden.exitCode, 0);
+    assert.ok(!overridden.stdout.includes("\u001b["), "--no-color must win over FORCE_COLOR");
+  });
+
+  it("honors NO_COLOR and leaves the report unchanged", async () => {
+    const baseline = plain((await runDiffold([FIXTURE_DIR1, FIXTURE_DIR2])).stdout);
+
+    const noColor = await runDiffold([FIXTURE_DIR1, FIXTURE_DIR2], { NO_COLOR: "1" });
+    assert.strictEqual(noColor.exitCode, 0);
+    assert.strictEqual(plain(noColor.stdout), baseline);
+    assert.ok(!noColor.stdout.includes("\u001b["));
+
+    const flag = await runDiffold([FIXTURE_DIR1, FIXTURE_DIR2, "--no-color"]);
+    assert.strictEqual(flag.exitCode, 0);
+    assert.strictEqual(plain(flag.stdout), baseline);
+  });
+
+  it("--quick compares size and mtime, and labels the mode in text and JSON", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "quick-a", { "shared.txt": "same" });
+      const b = await makeTree(parent, "quick-b", { "shared.txt": "same" });
+      const stamp = new Date("2020-01-01T00:00:00Z");
+      await utimes(path.join(a, "shared.txt"), stamp, stamp);
+      await utimes(path.join(b, "shared.txt"), stamp, stamp);
+
+      const json = JSON.parse((await runDiffold([a, b, "--quick", "--json"])).stdout);
+      assert.strictEqual(json.contentComparison, "quick");
+      assert.deepStrictEqual(json.modified, []);
+      assert.deepStrictEqual(json.identical, ["shared.txt"]);
+
+      const human = plain((await runDiffold([a, b, "--quick"])).stdout);
+      assert.ok(human.includes("0 changed"));
+      // The trade-off is visible in the report, not only in the docs.
+      assert.ok(human.includes("size + mtime"));
+    });
+  });
+
+  it("--quick flags an mtime-only difference that hashing reports as identical", async () => {
+    await withTempRoot(async (parent) => {
+      const a = await makeTree(parent, "quick-mtime-a", { "shared.txt": "same" });
+      const b = await makeTree(parent, "quick-mtime-b", { "shared.txt": "same" });
+      const older = new Date("2020-01-01T00:00:00Z");
+      const newer = new Date("2021-01-01T00:00:00Z");
+      await utimes(path.join(a, "shared.txt"), older, older);
+      await utimes(path.join(b, "shared.txt"), newer, newer);
+
+      const hashed = JSON.parse((await runDiffold([a, b, "--json"])).stdout);
+      const quick = JSON.parse((await runDiffold([a, b, "--quick", "--json"])).stdout);
+
+      assert.deepStrictEqual(hashed.modified, []);
+      assert.deepStrictEqual(quick.modified, [{ path: "shared.txt", groups: [[0], [1]] }]);
+    });
+  });
+
+  it("rejects --quick combined with --no-content", async () => {
+    const result = await runDiffold([FIXTURE_DIR1, FIXTURE_DIR2, "--quick", "--no-content"]);
+
+    assert.strictEqual(result.exitCode, 2);
+    assert.strictEqual(result.stdout, "");
+    assert.ok(result.stderr.includes("--no-content and --quick cannot be combined"));
   });
 });
 

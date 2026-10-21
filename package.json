@@ -1,6 +1,6 @@
 {
   "name": "diffold",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Compare directories and show differences with color-coded output",
   "type": "module",
   "packageManager": "bun@1.4.0",
@@ -24,11 +24,9 @@
     "prepublishOnly": "bun run typecheck && bun test && bun run test && bun run build",
     "test": "node --import tsx --test tests/**/*.test.ts",
     "test:bun": "bun test",
-    "test:deno": "deno test --allow-read --allow-write --allow-env --allow-run --allow-sys tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "start": "bun run build && node dist/index.js",
     "start:bun": "bun index.ts",
-    "start:deno": "deno run --allow-read --allow-env --allow-sys index.ts",
     "start:dist": "node dist/index.js"
   },
   "files": [
@@ -46,7 +44,6 @@
     "cli",
     "bun",
     "node",
-    "deno",
     "typescript",
     "folder-diff"
   ],

@@ -11,7 +11,6 @@ Compare 2–5 directories and see which files are unique, missing, and common ac
 [![published](https://img.shields.io/npm/last-update/diffold?label=published)](https://www.npmjs.com/package/diffold)
 [![license](https://img.shields.io/npm/l/diffold)](./LICENSE)
 [![node](https://img.shields.io/node/v/diffold)](https://nodejs.org/)
-[![deno](https://img.shields.io/badge/deno-2.x%20best--effort-black?logo=deno)](https://deno.com/)
 [![CI](https://github.com/drizzer/diffold/actions/workflows/checks.yml/badge.svg)](https://github.com/drizzer/diffold/actions/workflows/checks.yml)
 [![zero runtime dependencies](https://img.shields.io/badge/zero%20runtime%20dependencies-brightgreen)](./package.json)
 
@@ -21,7 +20,7 @@ Compare 2–5 directories and see which files are unique, missing, and common ac
 
 </div>
 
-`diffold` is a small runtime-agnostic TypeScript CLI. The published package ships compiled JavaScript for package runners, so end users can run it directly with `npx` or `bunx`.
+`diffold` is a small dependency-free TypeScript CLI. The published package ships compiled JavaScript for package runners, so end users can run it directly with `npx` or `bunx`.
 
 ## Quick Start
 
@@ -39,21 +38,23 @@ diffold dir1 dir2 dir3
 
 - Multi-directory comparison for 2–5 directories
 - Content-aware comparison with streaming SHA-256 hashing (disable with `-c`)
+- `--quick` size/mtime comparison for trees too large to hash (approximate)
 - Versioned JSON output for CI, scripts, and piping to tools such as `jq`
 - Repeatable glob exclusions for files, directory names, and subtrees
 - Summary-first output that stays readable on large trees, with `--verbose` and `--quiet`
 - Report file output with `-f`, extension inference, and overwrite protection
 - CI-friendly exit codes with an opt-in `--fail-on-diff` gate
 - Matrix presence table by default (`--matrix`/`-m`), with `--list`/`-l` for per-folder lists; rows where every folder agrees are hidden unless `--verbose`
-- Color-coded terminal output
+- Color-coded terminal output that stays plain when redirected or told to
+  (`--no-color`, `NO_COLOR`); report files never contain escape sequences
 - Unique, missing, and common file counts
 - Recursive directory traversal
 - `~` home-directory expansion
 - Windows drive and slash normalization
 - Guarded traversal (depth and file-count limits)
 - Terminal-safe output (ANSI/control-sequence sanitization)
-- Runtime source compatibility with Node.js and Bun. Deno source execution is
-  best-effort and remains non-blocking in CI.
+- `--help` and `--version` for self-documenting, script-friendly runs
+- Runtime source compatibility with Node.js and Bun
 
 ## Usage
 
@@ -66,15 +67,59 @@ Options:
 | Option | Effect |
 |--------|--------|
 | `-c`, `--no-content` | Compare paths only. Content comparison is enabled by default. |
+| `--quick` | Compare size and mtime instead of hashing common files (approximate). |
 | `--json` | Print a machine-readable JSON report to stdout. |
 | `-e`, `--exclude <glob>` | Exclude matching files/directories; repeat for multiple patterns. |
 | `-v`, `--verbose` | Print every entry instead of truncating long lists. |
 | `-q`, `--quiet` | Print only summary counts, no file lists. |
+| `--no-color` | Disable color. Also honors `NO_COLOR` and a redirected stdout. |
 | `-f [path]`, `--file`, `--output` | Write the report to a file instead of stdout. |
 | `--force` | Allow `-f` to overwrite an existing file. |
 | `--fail-on-diff` | Exit `1` when differences are found (CI gate). |
 | `--matrix`, `-m` | Per-file presence matrix (default view). |
 | `--list`, `-l` | Per-folder unique/missing lists instead. |
+| `-h`, `--help` | Print usage, options, exit codes, environment variables, and examples; exit `0`. |
+| `-V`, `--version` | Print `diffold <version>` from `package.json`; exit `0`. |
+
+`--help` and `--version` are immediate actions: they work without folder
+arguments, print to stdout, and exit `0`, so both are safe in scripts.
+
+```bash
+diffold --help
+diffold --version
+```
+
+## Comparison Modes
+
+| Mode | Flag | What counts as a difference | Cost |
+|------|------|-----------------------------|------|
+| Content (default) | — | Different bytes in files present in every folder | Reads every common file |
+| Presence only | `-c`, `--no-content` | A path exists in one folder but not another | No file reads |
+| Quick | `--quick` | Different size or mtime | One `stat()` per file |
+
+`--quick` is for trees too large to hash:
+
+```bash
+diffold build-old build-new --quick
+```
+
+It is **approximate by design**: two copies with identical content but different
+timestamps are reported as changed, and an edit that keeps both the size and the
+timestamp is missed. The report states `Mode: size + mtime (--quick); differences
+are approximate` (omitted under `--quiet`, whose contract is counts only), and
+`--json` reports `contentComparison: "quick"`. It cannot be combined with `-c`,
+which disables content comparison entirely.
+
+## Color
+
+Color is enabled only when stdout is a terminal. Redirecting stdout, setting
+`--no-color`, or setting `NO_COLOR` to any non-empty value disables it;
+`FORCE_COLOR=1` opts back in for pagers and CI viewers, and `--no-color` still
+wins over it. The decision follows stdout, so error lines on a redirected stderr
+inherit it (`2> file` at a real terminal keeps its escapes).
+
+Report files written with `-f` never contain escape sequences, regardless of the
+terminal, and `--json` output is never colored.
 
 ## Excluding Files
 
@@ -99,8 +144,9 @@ diffold dir1 dir2 --json | jq '.modified'
 ```
 
 The JSON contract includes `schemaVersion: 1`, folder metadata, `unique`, `missing`,
-`common`, `identical`, `modified`, and `incomplete`. Human-readable help text remains
-on stderr for usage errors, so successful JSON output is never mixed with diagnostics.
+`common`, `identical`, `modified`, and `incomplete`, plus `contentComparison`
+(`sha256`, `quick`, or `disabled`). Human-readable help text remains on stderr for
+usage errors, so successful JSON output is never mixed with diagnostics.
 
 ## Output Volume
 
@@ -261,7 +307,6 @@ Runtime-specific source execution:
 
 ```bash
 bun index.ts dir1 dir2
-deno run --allow-read --allow-env --allow-sys index.ts dir1 dir2
 npx tsx index.ts dir1 dir2
 ```
 
@@ -271,7 +316,7 @@ Installing straight from Git also works — the `prepare` script builds `dist/` 
 
 - Published package / `npx`: Node.js 22+
 - Published package / `bunx`: Bun 1.4+
-- Source execution: Bun 1.4+ or Node.js 22+ with `tsx`; Deno source execution is best-effort
+- Source execution: Bun 1.4+ or Node.js 22+ with `tsx`
 - Development: Bun 1.4+ (the declared `packageManager`)
 
 ## Contributing

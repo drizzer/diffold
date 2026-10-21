@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-10-21
+
+The CLI can explain itself, color stops leaking into data, and Deno support is withdrawn.
+
+### Added
+
+- `--help` / `-h` prints usage, options, exit codes, the `DIFFOLD_*` limits, and
+  examples to stdout, then exits `0`. It needs no folder arguments.
+- `--version` / `-V` prints `diffold <version>`, read from the installed
+  `package.json` so it cannot drift from the manifest, then exits `0`.
+- `--no-color`, plus automatic disabling when stdout is not a TTY and support for
+  the `NO_COLOR` convention. `FORCE_COLOR` opts back in for pagers and CI viewers;
+  the explicit flag still wins.
+- `--quick` compares size and mtime instead of hashing common files, for trees too
+  large to read. The report labels the mode, JSON reports
+  `contentComparison: "quick"`, and combining it with `-c` is a usage error.
+- Usage errors now end with a `HINT` line pointing at `--help` for the full
+  reference.
+
+### Changed
+
+- The usage error and `--help` render their option rows from one shared table, so
+  a flag can no longer be documented in one and missing from the other. Column
+  alignment in the usage error changed slightly as a result.
+
+### Fixed
+
+- `-f` report files no longer contain ANSI escape sequences. The human renderer
+  emitted color unconditionally, so a 426-byte two-folder report carried 17 escape
+  bytes when written to disk or piped.
+
+### Removed
+
+- Deno support. The `test:deno` and `start:deno` scripts are gone, as are the
+  non-blocking CI job, the `deno` package keyword, every Deno instruction in the
+  current docs, and `types/cross-runtime.d.ts`. Deno's runtime is being
+  discontinued upstream, and the path cost a CI job plus its own permission flags
+  for something no published user needed: the tarball ships compiled JavaScript
+  for Node.js 22+ and Bun 1.4+, which are the supported runtimes.
+
 ## [0.1.1] — 2026-10-21
 
 Documentation correction; no behavior change.

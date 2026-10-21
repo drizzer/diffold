@@ -1,14 +1,55 @@
+import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 
-// Color constants for terminal output
-const RED = "\x1b[31m";
-const GREEN = "\x1b[32m";
-const YELLOW = "\x1b[33m";
-const BLUE = "\x1b[34m";
-const RESET = "\x1b[0m";
+// Color constants for terminal output. They are `let` because the palette is
+// emptied once when the destination cannot render escapes (--no-color, NO_COLOR,
+// or a redirected stdout). Rewriting every interpolation site into helper calls
+// would buy nothing the empty strings do not already do.
+let RED = "\x1b[31m";
+let GREEN = "\x1b[32m";
+let YELLOW = "\x1b[33m";
+let BLUE = "\x1b[34m";
+let RESET = "\x1b[0m";
+
+function disableColor(): void {
+  RED = "";
+  GREEN = "";
+  YELLOW = "";
+  BLUE = "";
+  RESET = "";
+}
+
+// Environment access can throw in locked-down sandboxes; treat that as unset.
+function envDisablesColor(): boolean {
+  try {
+    return (process.env.NO_COLOR ?? "") !== "";
+  } catch {
+    return false;
+  }
+}
+
+// FORCE_COLOR opts back in when stdout is a pipe (pagers, CI log viewers). It
+// outranks NO_COLOR, because it is the more specific request, but not the
+// explicit --no-color flag, which is applied when the argument is parsed.
+function envForcesColor(): boolean {
+  try {
+    const value = process.env.FORCE_COLOR;
+    return value !== undefined && value !== "" && value !== "0";
+  } catch {
+    return false;
+  }
+}
+
+// https://no-color.org — NO_COLOR (non-empty) wins over auto-detection, and a
+// stdout that is not a TTY has nobody to render escapes. Applied at load so every
+// error path honours it, including ones raised before --no-color is parsed; the
+// flag re-applies it later.
+if (!envForcesColor() && (envDisablesColor() || process.stdout.isTTY !== true)) {
+  disableColor();
+}
 
 // Resource limits so a pathological tree cannot exhaust memory.
 // Override with DIFFOLD_MAX_DEPTH / DIFFOLD_MAX_FILES.
@@ -24,7 +65,8 @@ function readLimit(name: string, fallback: number): number {
     if (!Number.isInteger(parsed) || parsed < 1) return fallback;
     return parsed;
   } catch {
-    // Deno without --allow-env throws on process.env access
+    // Environment access can throw in locked-down sandboxes; a bad variable
+    // must never abort a comparison that would otherwise work.
     return fallback;
   }
 }
@@ -41,6 +83,12 @@ function sanitizeForDisplay(value: string): string {
   return value.replace(ANSI_ESCAPE, "").replace(CONTROL_CHARS, "");
 }
 
+// Report files are read in editors and diffed in CI, so they are always plain
+// text even when the terminal that produced them supports color.
+function stripColor(text: string): string {
+  return text.replace(ANSI_ESCAPE, "");
+}
+
 // Usage always shows the published binary name, regardless of the runtime
 // the source was launched with; the README documents source execution.
 // Exit codes: 0 = success, 1 = differences found (only with --fail-on-diff),
@@ -52,10 +100,114 @@ const EXIT_FATAL = 2;
 
 const RUNNER = "diffold";
 
+// One table feeds both the usage error and --help, so a flag can never appear
+// in one and be missing from the other. The column leaves room for the longest
+// flag (`-e, --exclude <glob>`) plus at least one space.
+const OPTION_COLUMN = 21;
+
+interface OptionRow {
+  readonly flag: string;
+  readonly description: string;
+}
+
+const OPTION_ROWS: readonly OptionRow[] = [
+  {
+    flag: "-c, --no-content",
+    description: "Compare paths only (content comparison is on by default)",
+  },
+  {
+    flag: "--quick",
+    description: "Compare size + mtime instead of hashing (approximate)",
+  },
+  { flag: "--json", description: "Print a machine-readable report to stdout" },
+  { flag: "-v, --verbose", description: "Print every entry instead of truncating long lists" },
+  { flag: "-q, --quiet", description: "Print only summary counts" },
+  { flag: "--no-color", description: "Disable color (also NO_COLOR, or a piped stdout)" },
+  {
+    flag: "-f [path]",
+    description: "Write the report to a file (default: diffold-report.txt|.json)",
+  },
+  { flag: "--force", description: "Allow -f to overwrite an existing file" },
+  { flag: "--fail-on-diff", description: "Exit 1 when differences are found (CI gate)" },
+  { flag: "--matrix", description: "Per-file presence matrix (default view)" },
+  { flag: "-l, --list", description: "Per-folder unique/missing lists instead" },
+  { flag: "-e, --exclude <glob>", description: "Exclude matching files/directories (repeatable)" },
+  { flag: "-h, --help", description: "Print this help and exit" },
+  { flag: "-V, --version", description: "Print the version and exit" },
+];
+
+// The bundle ships in dist/ while the source sits beside the manifest, so both
+// layouts are probed. `--version` must report what is actually installed rather
+// than a number copied into the source and left to drift from package.json.
+function readVersion(): string {
+  const candidates = [
+    new URL("./package.json", import.meta.url),
+    new URL("../package.json", import.meta.url),
+  ];
+  for (const candidate of candidates) {
+    try {
+      const manifest = JSON.parse(readFileSync(candidate, "utf8")) as {
+        version?: unknown;
+      } | null;
+      const version = manifest?.version;
+      if (typeof version === "string" && version.trim() !== "") return version;
+    } catch {
+      // No readable manifest at this location; the other layout may have it.
+    }
+  }
+  return "unknown";
+}
+
+function printHelp(): void {
+  const lines = [
+    `${RUNNER} ${readVersion()}`,
+    "",
+    "Compare 2-5 directories and show which files are unique, missing, and common.",
+    "",
+    "Usage:",
+    `  ${RUNNER} <dir1> <dir2> [... <dirN>] [options]`,
+    "",
+    "Options:",
+    ...OPTION_ROWS.map((row) => `  ${row.flag.padEnd(OPTION_COLUMN)}${row.description}`),
+    "",
+    "Exit codes:",
+    `  ${EXIT_SUCCESS}  Success`,
+    `  ${EXIT_DIFFERENCES}  Differences found (only with --fail-on-diff)`,
+    `  ${EXIT_FATAL}  Usage error or fatal failure`,
+    "",
+    "Environment:",
+    `  DIFFOLD_MAX_DEPTH  Maximum directory depth (default ${DEFAULT_MAX_DEPTH})`,
+    `  DIFFOLD_MAX_FILES  Maximum files per directory (default ${DEFAULT_MAX_FILES})`,
+    "",
+    "Examples:",
+    `  ${RUNNER} ./before ./after`,
+    `  ${RUNNER} a b c --json`,
+    `  ${RUNNER} old new --exclude "node_modules/**" --fail-on-diff`,
+    "",
+    `  -f also accepts --file and --output, with or without =path.`,
+  ];
+  console.log(lines.join("\n"));
+}
+
+function exitWithUsageError(): never {
+  console.error(
+    `${RED}Usage: ${RUNNER} <dir1> <dir2> [... <dirN>] [options] (2-5 directories)${RESET}`,
+  );
+  OPTION_ROWS.forEach((row, index) => {
+    const label = index === 0 ? "Options: " : "         ";
+    console.error(`${RED}${label}${row.flag.padEnd(OPTION_COLUMN)}${row.description}${RESET}`);
+  });
+  console.error(`${RED}HINT: Run '${RUNNER} --help' for the full reference${RESET}`);
+  process.exit(EXIT_FATAL);
+}
+
 const rawArgs = process.argv.slice(2);
 const rawDirs: string[] = [];
 const excludePatterns: string[] = [];
 let compareContent = true;
+// --quick keeps the content-comparison pipeline but fingerprints with size and
+// mtime instead of reading every common file; the trade-off is documented.
+let quickCompare = false;
 let jsonOutput = false;
 let verbose = false;
 let quiet = false;
@@ -72,6 +224,24 @@ let listViewRequested = false;
 
 for (let i = 0; i < rawArgs.length; i++) {
   const arg = rawArgs[i];
+  // Immediate actions: they win over any other argument, and they never require
+  // the 2-5 directory check below, so `diffold --help` works on its own.
+  if (arg === "-h" || arg === "--help") {
+    printHelp();
+    process.exit(EXIT_SUCCESS);
+  }
+  if (arg === "-V" || arg === "--version") {
+    console.log(`${RUNNER} ${readVersion()}`);
+    process.exit(EXIT_SUCCESS);
+  }
+  if (arg === "--no-color") {
+    disableColor();
+    continue;
+  }
+  if (arg === "--quick") {
+    quickCompare = true;
+    continue;
+  }
   if (arg === "-c" || arg === "--no-content") {
     compareContent = false;
     continue;
@@ -157,6 +327,11 @@ for (let i = 0; i < rawArgs.length; i++) {
   rawDirs.push(arg);
 }
 
+if (quickCompare && !compareContent) {
+  console.error(`${RED}ERROR: --no-content and --quick cannot be combined${RESET}`);
+  process.exit(EXIT_FATAL);
+}
+
 if (verbose && quiet) {
   console.error(`${RED}ERROR: --verbose and --quiet cannot be combined${RESET}`);
   process.exit(EXIT_FATAL);
@@ -168,22 +343,7 @@ if (listViewRequested && matrixViewRequested) {
 }
 
 if (rawDirs.length < 2 || rawDirs.length > 5) {
-  console.error(
-    `${RED}Usage: ${RUNNER} <dir1> <dir2> [... <dirN>] [options] (2-5 directories)${RESET}`,
-  );
-  console.error(
-    `${RED}Options: -c, --no-content  Compare paths only (content comparison is on by default)${RESET}`,
-  );
-  console.error(`${RED}         --json            Print a machine-readable report to stdout${RESET}`);
-  console.error(`${RED}         -v, --verbose     Print every entry instead of truncating long lists${RESET}`);
-  console.error(`${RED}         -q, --quiet       Print only summary counts${RESET}`);
-  console.error(`${RED}         -f [path]         Write the report to a file (default: diffold-report.txt|.json)${RESET}`);
-  console.error(`${RED}         --force           Allow -f to overwrite an existing file${RESET}`);
-  console.error(`${RED}         --fail-on-diff    Exit 1 when differences are found (CI gate)${RESET}`);
-  console.error(`${RED}         --matrix          Per-file presence matrix (default view)${RESET}`);
-  console.error(`${RED}         -l, --list        Per-folder unique/missing lists instead${RESET}`);
-  console.error(`${RED}Options: -e, --exclude <glob>  Exclude matching files/directories (repeatable)${RESET}`);
-  process.exit(EXIT_FATAL);
+  exitWithUsageError();
 }
 
 for (let i = 0; i < rawDirs.length; i++) {
@@ -415,7 +575,9 @@ async function getRelativeFiles(root: string): Promise<{
 
 interface FileFingerprint {
   size: number;
-  hash: string;
+  // SHA-256 hex by default; `mtime:<ms>` under --quick. One string field keeps
+  // the grouping below branch-free.
+  stamp: string;
 }
 
 interface ContentDifference {
@@ -425,7 +587,7 @@ interface ContentDifference {
 
 interface JsonReport {
   schemaVersion: 1;
-  contentComparison: "sha256" | "disabled";
+  contentComparison: "sha256" | "quick" | "disabled";
   folders: Array<{
     path: string;
     totalFiles: number;
@@ -452,10 +614,22 @@ async function fingerprintFile(filePath: string): Promise<FileFingerprint> {
       hash.update(buffer.subarray(0, bytesRead));
       position += bytesRead;
     }
-    return { size: stat.size, hash: hash.digest("hex") };
+    return { size: stat.size, stamp: hash.digest("hex") };
   } finally {
     await handle.close();
   }
+}
+
+// --quick trades certainty for speed: two copies with identical content but
+// different timestamps are reported as changed, and a timestamp-preserving edit
+// of the same length is missed. The report says so.
+async function fingerprintFileQuick(filePath: string): Promise<FileFingerprint> {
+  const stat = await fs.stat(filePath);
+  return { size: stat.size, stamp: `mtime:${Math.trunc(stat.mtimeMs)}` };
+}
+
+function fingerprint(filePath: string): Promise<FileFingerprint> {
+  return quickCompare ? fingerprintFileQuick(filePath) : fingerprintFile(filePath);
 }
 
 async function compareCommonContent(
@@ -468,16 +642,16 @@ async function compareCommonContent(
   for (const relativePath of [...commonAll].sort()) {
     const fingerprints: FileFingerprint[] = [];
     for (let folderIndex = 0; folderIndex < roots.length; folderIndex++) {
-      const fingerprint = await fingerprintFile(
+      const current = await fingerprint(
         path.join(roots[folderIndex], ...relativePath.split("/")),
       );
-      fingerprints.push(fingerprint);
+      fingerprints.push(current);
     }
 
     const groups = new Map<string, number[]>();
     for (let folderIndex = 0; folderIndex < fingerprints.length; folderIndex++) {
       const fingerprint = fingerprints[folderIndex];
-      const key = `${fingerprint.size}:${fingerprint.hash}`;
+      const key = `${fingerprint.size}:${fingerprint.stamp}`;
       const group = groups.get(key);
       if (group) {
         group.push(folderIndex);
@@ -589,6 +763,13 @@ function buildMatrixRows(
   }));
 }
 
+// --quick changes what "changed" means, so every human report says which mode
+// produced its numbers. --quiet stays quiet: its contract is counts only.
+function reportQuickMode(): void {
+  if (!quickCompare) return;
+  report(`${YELLOW}Mode: size + mtime (--quick); differences are approximate${RESET}`);
+}
+
 function printMatrix(
   rows: MatrixRow[],
   commonAll: Set<string>,
@@ -640,6 +821,7 @@ function printMatrix(
   } else {
     report("Content: comparison disabled (-c)");
   }
+  reportQuickMode();
   if (hiddenIdentical > 0) {
     report(
       `${YELLOW}${hiddenIdentical} identical row${hiddenIdentical === 1 ? "" : "s"} hidden (use --verbose to show all)${RESET}`,
@@ -734,6 +916,7 @@ function printHumanReport(
     report(
       `Content: ${GREEN}${identicalCount} identical${RESET} | ${contentDifferences.length > 0 ? RED : ""}${contentDifferences.length} changed${RESET}`,
     );
+    reportQuickMode();
     if (contentDifferences.length > 0) {
       const shown = verbose
         ? contentDifferences
@@ -818,7 +1001,7 @@ async function writeReportFile(
   }
 
   const captured: string[] = [];
-  reportSink = (line) => captured.push(line);
+  reportSink = (line) => captured.push(stripColor(line));
   try {
     content();
   } finally {
@@ -885,7 +1068,11 @@ async function main() {
     if (jsonOutput) {
       const jsonReport: JsonReport = {
         schemaVersion: 1,
-        contentComparison: compareContent ? "sha256" : "disabled",
+        contentComparison: !compareContent
+          ? "disabled"
+          : quickCompare
+            ? "quick"
+            : "sha256",
         folders: validDirs.map((folder, index) => ({
           path: folder,
           totalFiles: validFiles[index].size,

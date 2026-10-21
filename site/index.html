@@ -162,11 +162,14 @@ diffold build-a build-b --fail-on-diff</code></pre>
 --json             machine-readable
 -e, --exclude      repeatable globs
 -v / -q            all rows / counts only
--f [path]          write report to file</code></pre></article>
+-f [path]          write report to file
+-h / -V            help / version
+--quick            size + mtime mode
+--no-color         plain text output</code></pre></article>
       <article><h3>Install and run</h3><pre><code>npx diffold dir1 dir2
 bunx diffold dir1 dir2 dir3
 npm i -g diffold</code></pre>
-      <p>Requires Node.js 22+ or Bun 1.4+. Deno source runs are best-effort.</p></article>
+      <p>Requires Node.js 22+ or Bun 1.4+.</p></article>
       <article><h3>Project</h3>
         <p><a href="https://github.com/drizzer/diffold">GitHub repository</a> · <a href="https://www.npmjs.com/package/diffold">npm package</a> · <a href="https://github.com/drizzer/diffold/blob/main/LICENSE">MIT license</a></p>
         <p>Bug reports are most useful with the exact arguments, folder layout, and expected result. Security issues go through <a href="https://github.com/drizzer/diffold/security/advisories/new">private advisories</a>.</p>

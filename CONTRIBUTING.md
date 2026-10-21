@@ -11,8 +11,12 @@ diffold <dir1> <dir2> [... <dirN>] [options]
 | Option | Effect |
 |--------|--------|
 | `-c`, `--no-content` | Compare paths only (content comparison is on by default) |
+| `--quick` | Compare size + mtime instead of hashing (approximate) |
+| `--no-color` | Disable ANSI color (also `NO_COLOR`, or a redirected stdout) |
 | `--json` | Emit one machine-readable JSON report to stdout |
 | `-e`, `--exclude <glob>` | Exclude matching files/directories; repeatable, supports `*`, `?`, `**` |
+| `-h`, `--help` | Print the full reference (usage, options, exit codes, environment) |
+| `-V`, `--version` | Print `diffold <version>` from `package.json` |
 
 ## Development Setup
 
@@ -35,10 +39,8 @@ divergent dependency tree.
 | `bun run typecheck` | Type check without emitting |
 | `bun run test` | Run tests with the Node test runner (via `tsx`) |
 | `bun test` | Run tests with the Bun test runner |
-| `bun run test:deno` | Run tests with the Deno test runner |
 | `bun run start` | Build, then run the compiled CLI |
 | `bun run start:bun` | Run from source with Bun |
-| `bun run start:deno` | Run from source with Deno |
 | `bun run start:dist` | Run the already-built `dist/index.js` |
 
 `bun run prepublishOnly` is the full local gate (typecheck + Node tests + Bun
@@ -50,7 +52,6 @@ manual approval through the `npm-publish` GitHub Environment.
 
 ```
 index.ts                  # Entire CLI implementation (intentionally single-file)
-types/cross-runtime.d.ts  # Deno/Bun global type declarations
 tests/index.test.ts       # Test suite, exercised through the CLI as a subprocess
 docs/                     # Local maintainer docs (gitignored, not shipped)
 .github/workflows/        # checks.yml, publish-npm.yml, pages.yml
@@ -64,9 +65,8 @@ dependencies**. Do not split it without a strong reason and a changelog note.
 1. Create a branch from `main`.
 2. Make your changes.
 3. Type check: `bun run typecheck`.
-4. Run the suite on every supported runtime:
-   `bun run test && bun test` (and `bun run test:deno` if you touched runtime
-   conditionals). The suite currently has 50 tests.
+4. Run the suite on every supported runtime: `bun run test && bun test`.
+   The suite currently has 58 tests.
 5. Build and smoke test:
    `bun run build && node dist/index.js tests/test-folders/test_dir1 tests/test-folders/test_dir2`
 6. Open a pull request.
@@ -84,7 +84,7 @@ dependencies**. Do not split it without a strong reason and a changelog note.
 ## Testing
 
 Tests invoke the CLI as a subprocess, which is what makes one suite runnable
-under Node, Bun, and Deno.
+under Node and Bun.
 
 - Follow Arrange-Act-Assert
 - Use descriptive test names that state the behavior under test
