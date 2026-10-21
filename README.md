@@ -104,14 +104,15 @@ on stderr for usage errors, so successful JSON output is never mixed with diagno
 
 ## Output Volume
 
-File lists are capped at **20 entries per section** by default, followed by
-`... and N more (use --verbose to show all)`. On a real 684-vs-584-file comparison
-this keeps the report at ~118 lines instead of ~592.
+Every human-readable section caps at **20 entries** by default: unique files,
+missing files, changed files, and visible matrix rows. A truncated section ends
+with `... and N more (use --verbose to show all)`.
 
 ```bash
-diffold dir1 dir2              # counts + first 20 entries per section
-diffold dir1 dir2 --verbose    # every entry (or -v)
-diffold dir1 dir2 --quiet      # summary counts only, no file lists (or -q)
+diffold dir1 dir2              # matrix: notable rows, first 20 (default)
+diffold dir1 dir2 --list       # per-folder lists, first 20 per section (or -l)
+diffold dir1 dir2 --verbose    # every row and entry (or -v)
+diffold dir1 dir2 --quiet      # summary counts only, no rows or lists (or -q)
 ```
 
 `--json` is never truncated, regardless of these flags — machine consumers always
@@ -228,12 +229,13 @@ Legend: Y present  - absent  M modified (differs from every other folder)
 - Rows where **every** folder agrees are hidden by default — they carry no
   information when you are looking for what differs. The count is reported in the
   summary and `--verbose` reveals every row.
-- List rows are capped at 20 per section; `--verbose` prints everything.
+- Visible matrix rows are capped at 20, like the per-folder lists; `--verbose` prints
+  all of them.
 - Suppressed by `--quiet`, and combined with `-f` it writes the matrix to the file.
 - `--list` and `--matrix` together is an error and exits `2`.
 
-On the real 684-vs-584-file skills comparison the matrix renders in 30 lines, versus
-118 for `--list` and 592 with `--verbose`.
+On a 684-vs-584-file comparison the matrix renders in 31 lines, versus
+102 for `--list` and 793 with `--verbose`.
 
 ## Per-Folder Lists
 

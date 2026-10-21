@@ -1,6 +1,6 @@
 {
   "name": "diffold",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Compare directories and show differences with color-coded output",
   "type": "module",
   "packageManager": "bun@1.4.0",

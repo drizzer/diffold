@@ -530,7 +530,7 @@ function getCommonFiles(fileSets: Set<string>[]): Set<string> {
 }
 
 // Long file lists make a report unreadable on real trees (a 684-vs-584-file
-// comparison produced ~592 lines), so each section is capped unless --verbose.
+// comparison is 31 lines capped and 793 uncapped), so sections cap at 20.
 const DEFAULT_LIST_LIMIT = 20;
 
 function printList(

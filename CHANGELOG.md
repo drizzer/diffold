@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-10-21
+
+Documentation correction; no behavior change.
+
+### Fixed
+
+- Documentation matches shipped behavior: output-volume limits are described for the
+  matrix and list views, and workflow references name the current files
+  (`checks.yml`, `publish-npm.yml`, `pages.yml`).
+- Scale figures in the README, the landing site, and the source comment are measured
+  rather than remembered: a 684-vs-584-file comparison renders in 31 lines, 102 with
+  `--list`, and 793 with `--verbose`.
+
 ## [0.1.0] — 2026-10-12
 
 New views, CI-friendly exit codes, and report files.
@@ -44,7 +57,7 @@ New views, CI-friendly exit codes, and report files.
   (`assets/icon-512.png`, social card). The README header and the landing site
   both carry the logo.
 - GitHub Pages landing site in `site/`, deployed automatically on every push
-  to `main` by `deploy-pages.yml` (one-time "GitHub Actions" source setting).
+  to `main` by `pages.yml` (one-time "GitHub Actions" source setting).
 
 ## [0.0.6] — 2026-10-01
 
@@ -103,7 +116,7 @@ bounds, incomplete-traversal reporting, and the publish pipeline.
 - Count every visited file and directory against `DIFFOLD_MAX_FILES`, so directory-only trees can no longer bypass the file-count limit.
 - Keep documentation and security claims aligned with observed behavior for traversal bounds, argument validation, and incomplete traversals.
 - Clarify that Bun is the primary development runtime while retaining npm/Node.js compatibility, and document Deno source execution as best-effort.
-- Make manual `publish.yml` runs tag-based and dry-run by default, and pin the release npm CLI instead of using `npm@latest`.
+- Make manual `publish-npm.yml` runs tag-based and dry-run by default, and pin the release npm CLI instead of using `npm@latest`.
 
 ### Added
 
@@ -160,7 +173,7 @@ Initial release of `diffold`.
 - Named `async function main()` with a `.catch()` handler, and ANSI escapes centralized in `RED`/`RESET` constants.
 - Build script quotes `--external:"node:*"`, so `bun run build` works despite Bun's script shell glob expansion.
 - `prepare` script builds `dist/` during install, so installing straight from Git produces a working `bin` target.
-- GitHub Actions workflows: `ci.yml` (typecheck, both test runners, build, compiled-CLI smoke test, publish-payload check, Node 22/24/26 matrix, non-blocking Deno job) and `publish.yml` (release-tag/version guard, then `npm publish --provenance`).
+- GitHub Actions workflows: `checks.yml` (typecheck, both test runners, build, compiled-CLI smoke test, publish-payload check, Node 22/24/26 matrix, non-blocking Deno job) and `publish-npm.yml` (release-tag/version guard, then `npm publish --provenance`).
 
 ### Security
 
